@@ -63,18 +63,9 @@ export type {
   // Context Rules
   ContextRule,
   ContextRuleType,
-  Meta as ContextRuleMeta,
 
-  // WebAuthn signature data (contract format)
-  WebAuthnSigData,
-
-  // Signatures
-  Signatures,
-
-  // Policy types
-  SimpleThresholdAccountParams,
-  WeightedThresholdAccountParams,
-  SpendingLimitAccountParams,
+  // Auth payload (replaces Signatures in v0.7.0+)
+  AuthPayload,
 } from "smart-account-kit-bindings";
 
 // SignerId is the same type as Signer - used for signature map keys
@@ -138,6 +129,10 @@ export {
   createThresholdParams,
   createWeightedThresholdParams,
   createSpendingLimitParams,
+  // Policy parameter types (defined locally since v0.7.0)
+  type SimpleThresholdAccountParams,
+  type WeightedThresholdAccountParams,
+  type SpendingLimitAccountParams,
   // Time period constants (for spending limits)
   LEDGERS_PER_HOUR,
   LEDGERS_PER_DAY,

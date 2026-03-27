@@ -466,7 +466,7 @@ export class SmartAccountKit {
     this.multiSigners = new MultiSignerManagerClass({
       getContractId: () => this._contractId,
       isConnected: () => this.isConnected,
-      getRules: (contextRuleType) => this.rules.getAll(contextRuleType),
+      getRule: (contextRuleId) => this.rules.get(contextRuleId),
       externalSigners: this.externalSigners,
       rpc: this.rpc,
       networkPassphrase: this.networkPassphrase,
@@ -567,7 +567,7 @@ export class SmartAccountKit {
    * Returns the current state including active context rules, signers, and policies.
    * This is useful for displaying contract details without making on-chain calls.
    *
-   * Note: For real-time data, use `kit.rules.getAll()` instead which queries on-chain.
+   * Note: For real-time data, use `kit.rules.get(id)` instead which queries on-chain.
    *
    * @param contractId - Smart account contract address (C...)
    * @returns Contract details or null if not found/indexer unavailable
@@ -985,6 +985,7 @@ export class SmartAccountKit {
     options?: {
       credentialId?: string;
       expiration?: number;
+      contextRuleIds?: number[];
     }
   ): Promise<xdr.SorobanAuthorizationEntry> {
     return signAuthEntry(

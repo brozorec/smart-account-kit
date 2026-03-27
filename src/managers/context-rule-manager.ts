@@ -21,8 +21,8 @@ export interface ContextRuleManagerDeps {
         signers: ContractSigner[];
         policies: Map<string, unknown>;
       }) => Promise<AssembledTransaction<ContextRule>>;
-      get_context_rule: (args: { context_rule_id: number }) => Promise<AssembledTransaction<ContextRule | undefined>>;
-      get_context_rules: (args: { context_rule_type: ContextRuleType }) => Promise<AssembledTransaction<ContextRule[]>>;
+      get_context_rule: (args: { context_rule_id: number }) => Promise<AssembledTransaction<ContextRule>>;
+      get_context_rules_count: () => Promise<AssembledTransaction<number>>;
       remove_context_rule: (args: { context_rule_id: number }) => Promise<AssembledTransaction<null>>;
       update_context_rule_name: (args: { context_rule_id: number; name: string }) => Promise<AssembledTransaction<ContextRule>>;
       update_context_rule_valid_until: (args: { context_rule_id: number; valid_until: number | undefined }) => Promise<AssembledTransaction<ContextRule>>;
@@ -96,16 +96,13 @@ export class ContextRuleManager {
   }
 
   /**
-   * Get all context rules of a specific type.
+   * Get the total count of context rules (including expired rules).
    *
-   * @param contextRuleType - The type of rules to retrieve (Default, CallContract, CreateContract)
-   * @returns Assembled transaction that returns an array of matching rules
+   * @returns Assembled transaction that returns the count
    * @throws Error if not connected to a wallet
    */
-  async getAll(contextRuleType: ContextRuleType) {
-    return this.deps.requireWallet().wallet.get_context_rules({
-      context_rule_type: contextRuleType,
-    });
+  async getCount() {
+    return this.deps.requireWallet().wallet.get_context_rules_count();
   }
 
   /**

@@ -82,6 +82,12 @@ export interface StoredCredential {
   /** Whether this was the primary passkey used to deploy the wallet */
   isPrimary?: boolean;
 
+  /** On-chain signer ID returned by add_signer (for efficient removal) */
+  signerId?: number;
+
+  /** Full key_data (public key + credential ID) for signing without on-chain lookup */
+  keyData?: Buffer;
+
   /**
    * Deployment status:
    * - "pending": Credential created locally, deployment not yet attempted or in progress

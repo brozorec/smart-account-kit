@@ -16,10 +16,10 @@ export interface PolicyManagerDeps {
         context_rule_id: number;
         policy: string;
         install_param: unknown;
-      }) => Promise<AssembledTransaction<null>>;
+      }) => Promise<AssembledTransaction<number>>;
       remove_policy: (args: {
         context_rule_id: number;
-        policy: string;
+        policy_id: number;
       }) => Promise<AssembledTransaction<null>>;
     };
   };
@@ -69,17 +69,17 @@ export class PolicyManager {
   }
 
   /**
-   * Remove a policy from a context rule.
+   * Remove a policy from a context rule by policy ID.
    *
    * @param contextRuleId - The numeric ID of the context rule to remove the policy from
-   * @param policyAddress - The contract address of the policy to remove
+   * @param policyId - The numeric policy ID to remove (from add_policy result or ContextRule.policy_ids)
    * @returns Assembled transaction that removes the policy when signed and sent
    * @throws Error if not connected to a wallet
    */
-  async remove(contextRuleId: number, policyAddress: string) {
+  async remove(contextRuleId: number, policyId: number) {
     return this.deps.requireWallet().wallet.remove_policy({
       context_rule_id: contextRuleId,
-      policy: policyAddress,
+      policy_id: policyId,
     });
   }
 }

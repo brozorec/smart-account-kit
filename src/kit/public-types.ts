@@ -16,7 +16,6 @@ import type {
   Client as SmartAccountClient,
   Signer as ContractSigner,
   ContextRuleType,
-  WebAuthnSigData,
 } from "smart-account-kit-bindings";
 
 // Sub-manager Type Definitions
@@ -41,13 +40,13 @@ export interface SignerManager {
     publicKey: string
   ): ReturnType<SmartAccountClient["add_signer"]>;
 
-  /** Remove a signer from a context rule */
+  /** Remove a signer from a context rule by signer ID */
   remove(
     contextRuleId: number,
-    signer: ContractSigner
+    signerId: number
   ): ReturnType<SmartAccountClient["remove_signer"]>;
 
-  /** Remove a passkey signer by credential ID */
+  /** Remove a passkey signer by credential ID (looks up signer ID automatically) */
   removePasskey(
     contextRuleId: number,
     credentialId: string
@@ -68,8 +67,8 @@ export interface ContextRuleManager {
   /** Get a context rule by ID */
   get(contextRuleId: number): ReturnType<SmartAccountClient["get_context_rule"]>;
 
-  /** Get all context rules of a specific type */
-  getAll(contextRuleType: ContextRuleType): ReturnType<SmartAccountClient["get_context_rules"]>;
+  /** Get the total count of context rules */
+  getCount(): ReturnType<SmartAccountClient["get_context_rules_count"]>;
 
   /** Remove a context rule */
   remove(contextRuleId: number): ReturnType<SmartAccountClient["remove_context_rule"]>;
@@ -96,10 +95,10 @@ export interface PolicyManager {
     installParams: unknown
   ): ReturnType<SmartAccountClient["add_policy"]>;
 
-  /** Remove a policy from a context rule */
+  /** Remove a policy from a context rule by policy ID */
   remove(
     contextRuleId: number,
-    policyAddress: string
+    policyId: number
   ): ReturnType<SmartAccountClient["remove_policy"]>;
 }
 
@@ -236,9 +235,10 @@ export interface MultiSignerManager {
   ): Promise<TransactionResult>;
 
   /**
-   * Get all available signers from on-chain context rules.
+   * Get available signers from a specific on-chain context rule.
+   * @param contextRuleId - The context rule ID (defaults to 0)
    */
-  getAvailableSigners(): Promise<ContractSigner[]>;
+  getAvailableSigners(contextRuleId?: number): Promise<ContractSigner[]>;
 
   /**
    * Extract credential ID from an External signer's key_data.
@@ -293,5 +293,4 @@ export type {
   SelectedSigner,
   ConnectedWallet,
   ContractSigner,
-  WebAuthnSigData,
 };

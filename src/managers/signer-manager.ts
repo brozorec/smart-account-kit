@@ -18,8 +18,9 @@ export interface SignerManagerDeps {
   /** Get the connected wallet client, throws if not connected */
   requireWallet: () => {
     wallet: {
-      add_signer: (args: { context_rule_id: number; signer: ContractSigner }) => Promise<AssembledTransaction<null>>;
-      remove_signer: (args: { context_rule_id: number; signer: ContractSigner }) => Promise<AssembledTransaction<null>>;
+      add_signer: (args: { context_rule_id: number; signer: ContractSigner }) => Promise<AssembledTransaction<number>>;
+      remove_signer: (args: { context_rule_id: number; signer_id: number }) => Promise<AssembledTransaction<null>>;
+      get_signer_id: (args: { signer: ContractSigner }) => Promise<AssembledTransaction<number>>;
     };
     contractId: string;
   };
@@ -61,7 +62,10 @@ export class SignerManager {
       userName
     );
 
-    // Store the credential
+    // Build the External signer key data
+    const keyData = buildKeyData(publicKey, credentialId);
+
+    // Store the credential (with keyData for signing without on-chain lookup)
     const storedCredential: StoredCredential = {
       credentialId,
       publicKey,
@@ -71,15 +75,13 @@ export class SignerManager {
       transports: rawResponse.response.transports,
       isPrimary: false,
       contextRuleId,
+      keyData,
     };
 
     await this.deps.storage.save(storedCredential);
 
     // Emit credential created event
     this.deps.events.emit("credentialCreated", { credential: storedCredential });
-
-    // Build the External signer for the contract
-    const keyData = buildKeyData(publicKey, credentialId);
     const signer: ContractSigner = {
       tag: "External",
       values: [this.deps.webauthnVerifierAddress, keyData],
@@ -116,29 +118,20 @@ export class SignerManager {
   }
 
   /**
-   * Remove a signer from a context rule.
+   * Remove a signer from a context rule by signer ID.
    */
-  async remove(contextRuleId: number, signer: ContractSigner) {
+  async remove(contextRuleId: number, signerId: number) {
     const { wallet } = this.deps.requireWallet();
-
-    // If it's an External signer (passkey), remove from local storage
-    if (signer.tag === "External") {
-      const keyData = signer.values[1] as Buffer;
-      // Only try to delete if keyData contains a credential ID suffix
-      if (keyData.length > SECP256R1_PUBLIC_KEY_SIZE) {
-        const credentialId = base64url.encode(keyData.slice(SECP256R1_PUBLIC_KEY_SIZE));
-        await this.deps.storage.delete(credentialId);
-      }
-    }
 
     return wallet.remove_signer({
       context_rule_id: contextRuleId,
-      signer,
+      signer_id: signerId,
     });
   }
 
   /**
    * Remove a passkey signer by credential ID.
+   * Looks up the signer ID from local storage or on-chain, then removes.
    */
   async removePasskey(contextRuleId: number, credentialId: string) {
     const credential = await this.deps.storage.get(credentialId);
@@ -146,12 +139,32 @@ export class SignerManager {
       throw new Error(`Credential ${credentialId} not found in storage`);
     }
 
-    const keyData = buildKeyData(credential.publicKey, credentialId);
-    const signer: ContractSigner = {
-      tag: "External",
-      values: [this.deps.webauthnVerifierAddress, keyData],
-    };
+    const { wallet } = this.deps.requireWallet();
 
-    return this.remove(contextRuleId, signer);
+    // Use stored signerId if available, otherwise look up on-chain
+    const storedSignerId = credential.signerId;
+    let signerId: number;
+    if (storedSignerId != null) {
+      signerId = storedSignerId;
+    } else {
+      const keyData = buildKeyData(credential.publicKey, credentialId);
+      const signer: ContractSigner = {
+        tag: "External",
+        values: [this.deps.webauthnVerifierAddress, keyData],
+      };
+      const result = await wallet.get_signer_id({ signer });
+      if (result.result == null) {
+        throw new Error(`Signer not found on-chain for credential ${credentialId}`);
+      }
+      signerId = result.result;
+    }
+
+    // Clean up local storage
+    await this.deps.storage.delete(credentialId);
+
+    return wallet.remove_signer({
+      context_rule_id: contextRuleId,
+      signer_id: signerId,
+    });
   }
 }

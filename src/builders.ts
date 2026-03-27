@@ -11,10 +11,24 @@ import { Address } from "@stellar/stellar-sdk";
 import type {
   Signer,
   ContextRuleType,
-  SimpleThresholdAccountParams,
-  WeightedThresholdAccountParams,
-  SpendingLimitAccountParams,
 } from "smart-account-kit-bindings";
+
+/** Parameters for the SimpleThreshold policy contract */
+export interface SimpleThresholdAccountParams {
+  threshold: number;
+}
+
+/** Parameters for the WeightedThreshold policy contract */
+export interface WeightedThresholdAccountParams {
+  signer_weights: Map<Signer, number>;
+  threshold: number;
+}
+
+/** Parameters for the SpendingLimit policy contract */
+export interface SpendingLimitAccountParams {
+  period_ledgers: number;
+  spending_limit: bigint | number;
+}
 import { buildKeyData } from "./utils";
 import { ValidationError, SmartAccountErrorCode } from "./errors";
 import { SECP256R1_PUBLIC_KEY_SIZE } from "./constants";

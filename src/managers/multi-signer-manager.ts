@@ -17,11 +17,12 @@ import {
 const { assembleTransaction } = rpcModule;
 import type { Keypair, Transaction, rpc } from "@stellar/stellar-sdk";
 import type { AssembledTransaction } from "@stellar/stellar-sdk/contract";
-import type { Signer as ContractSigner, ContextRuleType } from "smart-account-kit-bindings";
+import type { Signer as ContractSigner, ContextRule } from "smart-account-kit-bindings";
 import type { ExternalSignerManager } from "../external-signers";
 import type { SelectedSigner, SubmissionOptions, TransactionResult } from "../types";
 import { BASE_FEE, AUTH_ENTRY_EXPIRATION_BUFFER } from "../constants";
 import { getCredentialIdFromSigner, collectUniqueSigners } from "../builders";
+import { buildAuthPayloadScVal, getSignersMapFromAuthPayload } from "../kit/webauthn-ops";
 
 /** Type guard for transaction result with status and hash properties */
 interface SendTransactionResult {
@@ -50,8 +51,8 @@ export interface MultiSignerManagerDeps {
   getContractId: () => string | undefined;
   /** Check if connected to a wallet */
   isConnected: () => boolean;
-  /** Get context rules */
-  getRules: (contextRuleType: ContextRuleType) => Promise<{ result?: Array<{ signers: ContractSigner[] }> }>;
+  /** Get a context rule by ID */
+  getRule: (contextRuleId: number) => Promise<{ result?: ContextRule }>;
   /** External signer manager for wallet signing */
   externalSigners: ExternalSignerManager;
   /** RPC server */
@@ -67,7 +68,7 @@ export interface MultiSignerManagerDeps {
   /** Sign an auth entry with passkey */
   signAuthEntry: (
     entry: xdr.SorobanAuthorizationEntry,
-    options?: { credentialId?: string; expiration?: number }
+    options?: { credentialId?: string; expiration?: number; contextRuleIds?: number[] }
   ) => Promise<xdr.SorobanAuthorizationEntry>;
   /** Send transaction and poll for result */
   sendAndPoll: (tx: Transaction) => Promise<TransactionResult>;
@@ -92,23 +93,20 @@ export class MultiSignerManager {
   constructor(private deps: MultiSignerManagerDeps) {}
 
   /**
-   * Get available signers from on-chain context rules.
+   * Get available signers from a specific on-chain context rule.
+   *
+   * @param contextRuleId - The context rule ID to fetch signers from (defaults to 0)
    */
-  async getAvailableSigners(): Promise<ContractSigner[]> {
+  async getAvailableSigners(contextRuleId: number = 0): Promise<ContractSigner[]> {
     if (!this.deps.isConnected()) {
       return [];
     }
 
     try {
-      const defaultRulesResult = await this.deps.getRules({
-        tag: "Default",
-        values: undefined,
-      });
-      const defaultRules = defaultRulesResult.result || [];
-
-      // Collect all signers from all rules, then deduplicate
-      const allSigners = defaultRules.flatMap((rule) => rule.signers);
-      return collectUniqueSigners(allSigners);
+      const ruleResult = await this.deps.getRule(contextRuleId);
+      const rule = ruleResult.result;
+      if (!rule) return [];
+      return collectUniqueSigners(rule.signers);
     } catch (error) {
       console.warn("[SmartAccountKit] Failed to fetch available signers:", error);
       return [];
@@ -189,7 +187,7 @@ export class MultiSignerManager {
   async operation<T>(
     assembledTx: AssembledTransaction<T>,
     selectedSigners: SelectedSigner[],
-    options?: MultiSignerOptions
+    options?: MultiSignerOptions & { contextRuleIds?: number[] }
   ): Promise<TransactionResult> {
     const onLog = options?.onLog ?? (() => {});
     const contractId = this.deps.getContractId();
@@ -271,8 +269,11 @@ export class MultiSignerManager {
             signedEntry = await this.deps.signAuthEntry(signedEntry, {
               credentialId: passkeySigner?.credentialId,
               expiration,
+              contextRuleIds: options?.contextRuleIds ?? [0],
             });
           }
+
+          const contextRuleIds = options?.contextRuleIds ?? [0];
 
           // Add delegated signers to signature map
           for (const walletSigner of walletSigners) {
@@ -288,14 +289,13 @@ export class MultiSignerManager {
 
             if (ourSig.switch().name === "scvVoid") {
               signedEntry.credentials().address().signature(
-                xdr.ScVal.scvVec([
-                  xdr.ScVal.scvMap([
-                    new xdr.ScMapEntry({ key: delegatedSignerKey, val: emptyBytes }),
-                  ]),
-                ])
+                buildAuthPayloadScVal(
+                  [new xdr.ScMapEntry({ key: delegatedSignerKey, val: emptyBytes })],
+                  contextRuleIds
+                )
               );
             } else {
-              const sigMap = ourSig.vec()?.[0].map();
+              const sigMap = getSignersMapFromAuthPayload(ourSig);
               if (sigMap) {
                 sigMap.push(new xdr.ScMapEntry({ key: delegatedSignerKey, val: emptyBytes }));
                 sigMap.sort((a, b) => a.key().toXDR("hex").localeCompare(b.key().toXDR("hex")));
@@ -319,6 +319,12 @@ export class MultiSignerManager {
             );
             const signaturePayload = hash(smartAccountPreimage.toXDR());
 
+            // Compute auth digest: sha256(signature_payload || context_rule_ids.to_xdr())
+            const contextRuleIdsXdr = xdr.ScVal.scvVec(
+              contextRuleIds.map(id => xdr.ScVal.scvU32(id))
+            ).toXDR();
+            const authDigest = hash(Buffer.concat([signaturePayload, contextRuleIdsXdr]));
+
             for (const walletSigner of walletSigners) {
               if (!walletSigner.walletAddress) continue;
 
@@ -331,7 +337,7 @@ export class MultiSignerManager {
                   new xdr.InvokeContractArgs({
                     contractAddress: Address.fromString(contractId).toScAddress(),
                     functionName: "__check_auth",
-                    args: [xdr.ScVal.scvBytes(signaturePayload)],
+                    args: [xdr.ScVal.scvBytes(authDigest)],
                   })
                 ),
                 subInvocations: [],

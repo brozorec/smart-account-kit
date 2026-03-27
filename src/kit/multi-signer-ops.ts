@@ -3,6 +3,7 @@ import type { ExternalSignerManager } from "../external-signers";
 import { rpc } from "@stellar/stellar-sdk";
 import { Address, Keypair, Operation, TransactionBuilder, Transaction, hash, xdr } from "@stellar/stellar-sdk";
 import { BASE_FEE, AUTH_ENTRY_EXPIRATION_BUFFER, STROOPS_PER_XLM } from "../constants";
+import { buildAuthPayloadScVal, getSignersMapFromAuthPayload } from "./webauthn-ops";
 
 export async function multiSignersTransfer(
   deps: {
@@ -15,7 +16,7 @@ export async function multiSignersTransfer(
     deployerPublicKey: string;
     signAuthEntry: (
       entry: xdr.SorobanAuthorizationEntry,
-      options?: { credentialId?: string; expiration?: number }
+      options?: { credentialId?: string; expiration?: number; contextRuleIds?: number[] }
     ) => Promise<xdr.SorobanAuthorizationEntry>;
     shouldUseFeeSponsoring: (options?: SubmissionOptions) => boolean;
     hasSourceAccountAuth: (transaction: Transaction) => boolean;
@@ -25,7 +26,7 @@ export async function multiSignersTransfer(
   recipient: string,
   amount: number,
   selectedSigners: SelectedSigner[],
-  options?: { onLog?: (message: string, type?: "info" | "success" | "error") => void; forceMethod?: SubmissionMethod }
+  options?: { onLog?: (message: string, type?: "info" | "success" | "error") => void; forceMethod?: SubmissionMethod; contextRuleIds?: number[] }
 ): Promise<TransactionResult> {
   const onLog = options?.onLog ?? (() => {});
 
@@ -121,11 +122,13 @@ export async function multiSignersTransfer(
         let signedEntry = xdr.SorobanAuthorizationEntry.fromXDR(entry.toXDR());
         signedEntry.credentials().address().signatureExpirationLedger(expiration);
 
+        const contextRuleIds = options?.contextRuleIds ?? [0];
+
         for (let i = 0; i < passkeySigners.length; i++) {
           const passkeySigner = passkeySigners[i];
           onLog(`Signing smart account auth entry with passkey ${i + 1}/${passkeySigners.length}...`);
           const credentialId = passkeySigner?.credentialId;
-          signedEntry = await deps.signAuthEntry(signedEntry, { credentialId, expiration });
+          signedEntry = await deps.signAuthEntry(signedEntry, { credentialId, expiration, contextRuleIds });
         }
 
         for (const walletSigner of walletSigners) {
@@ -141,14 +144,13 @@ export async function multiSignersTransfer(
 
           if (ourSig.switch().name === "scvVoid") {
             signedEntry.credentials().address().signature(
-              xdr.ScVal.scvVec([
-                xdr.ScVal.scvMap([
-                  new xdr.ScMapEntry({ key: delegatedSignerKey, val: emptyBytes }),
-                ]),
-              ])
+              buildAuthPayloadScVal(
+                [new xdr.ScMapEntry({ key: delegatedSignerKey, val: emptyBytes })],
+                contextRuleIds
+              )
             );
           } else {
-            const sigMap = ourSig.vec()?.[0].map();
+            const sigMap = getSignersMapFromAuthPayload(ourSig);
             if (sigMap) {
               sigMap.push(new xdr.ScMapEntry({ key: delegatedSignerKey, val: emptyBytes }));
               sigMap.sort((a, b) => a.key().toXDR("hex").localeCompare(b.key().toXDR("hex")));
@@ -168,6 +170,12 @@ export async function multiSignersTransfer(
         );
         const signaturePayload = hash(smartAccountPreimage.toXDR());
 
+        // Compute auth digest: sha256(signature_payload || context_rule_ids.to_xdr())
+        const contextRuleIdsXdr = xdr.ScVal.scvVec(
+          contextRuleIds.map(id => xdr.ScVal.scvU32(id))
+        ).toXDR();
+        const authDigest = hash(Buffer.concat([signaturePayload, contextRuleIdsXdr]));
+
         for (const walletSigner of walletSigners) {
           if (!walletSigner.walletAddress) continue;
 
@@ -180,7 +188,7 @@ export async function multiSignersTransfer(
               new xdr.InvokeContractArgs({
                 contractAddress: Address.fromString(contractId).toScAddress(),
                 functionName: "__check_auth",
-                args: [xdr.ScVal.scvBytes(signaturePayload)],
+                args: [xdr.ScVal.scvBytes(authDigest)],
               })
             ),
             subInvocations: [],
