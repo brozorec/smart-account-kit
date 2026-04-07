@@ -124,6 +124,13 @@ import {
 } from "./kit/tx-ops";
 import { multiSignersTransfer } from "./kit/multi-signer-ops";
 import { convertPolicyParams, buildPoliciesScVal } from "./kit/policies-ops";
+import {
+  walkInvocationTree,
+  hintContextRuleIds,
+  resolveContextRuleIds,
+  type InvocationContextHint,
+} from "./kit/invocation-utils";
+import type { ContextRule } from "smart-account-kit-bindings";
 
 
 /**
@@ -911,6 +918,11 @@ export class SmartAccountKit {
     options?: {
       credentialId?: string;
       expiration?: number;
+      /**
+       * Context rule IDs, one per auth_context in the invocation tree.
+       * Use `kit.hintContextRuleIds(authEntry)` to get suggestions.
+       */
+      contextRuleIds?: number[];
     }
   ): Promise<contract.AssembledTransaction<T>> {
     const signed = await sign(
@@ -946,6 +958,11 @@ export class SmartAccountKit {
     options?: {
       credentialId?: string;
       expiration?: number;
+      /**
+       * Context rule IDs, one per auth_context in the invocation tree.
+       * Use `kit.hintContextRuleIds(authEntry)` to get suggestions.
+       */
+      contextRuleIds?: number[];
       /** Force a specific submission method (relayer or rpc) */
       forceMethod?: SubmissionMethod;
     }
@@ -1144,6 +1161,7 @@ export class SmartAccountKit {
     options?: {
       credentialId?: string;
       expiration?: number;
+      contextRuleIds?: number[];
     }
   ): Promise<Transaction> {
     return signResimulateAndPrepare(
@@ -1320,5 +1338,120 @@ export class SmartAccountKit {
     policyTypes: Map<string, "threshold" | "spending_limit" | "weighted_threshold" | "custom">
   ): xdr.ScVal {
     return buildPoliciesScVal(this.wallet, policies, policyTypes);
+  }
+
+  // ==========================================================================
+  // Context Rule ID Helpers
+  // ==========================================================================
+
+  /**
+   * Inspect an auth entry's invocation tree and show which on-chain context
+   * rules match each auth_context, with a suggested rule ID per context.
+   *
+   * Use this before signing to determine the correct `contextRuleIds` array
+   * for transactions that involve sub-invocations.
+   *
+   * **How to use:**
+   * ```typescript
+   * // 1. Simulate the transaction first
+   * const simResult = await kit.rpc.simulateTransaction(tx);
+   * const authEntry = simResult.result!.auth[0]; // smart-account entry
+   *
+   * // 2. Get hints for each auth_context in the invocation tree
+   * const hints = await kit.hintContextRuleIds(authEntry);
+   *
+   * // hints is an array, one entry per auth_context (depth-first order):
+   * // [
+   * //   { index: 0, contractAddress: "CB7Z…", functionName: "deposit",
+   * //     suggestedRuleId: 1,
+   * //     matchingRules: [
+   * //       { ruleId: 1, ruleName: "DeFi ops", contextType: "CallContract", reason: "…" },
+   * //       { ruleId: 0, ruleName: "Default",  contextType: "Default",      reason: "…" },
+   * //     ] },
+   * //   { index: 1, contractAddress: "CDSL…", functionName: "transfer",
+   * //     suggestedRuleId: 0,
+   * //     matchingRules: [{ ruleId: 0, … }] },
+   * // ]
+   *
+   * // 3. Build the contextRuleIds array from the hints
+   * const contextRuleIds = hints.map(h => h.suggestedRuleId); // [1, 0]
+   *
+   * // 4. Pass it to the signing call
+   * await kit.signAndSubmit(assembledTx, { contextRuleIds });
+   * // or
+   * await kit.multiSigners.operation(assembledTx, signers, { contextRuleIds });
+   * ```
+   *
+   * @param authEntry - A smart-account auth entry (from simulation result)
+   * @param options.defaultRuleId - Rule ID used when no rule explicitly matches (default 0)
+   * @returns Array of hints, one per auth_context, in depth-first order
+   */
+  async hintContextRuleIds(
+    authEntry: xdr.SorobanAuthorizationEntry,
+    options?: { defaultRuleId?: number }
+  ): Promise<InvocationContextHint[]> {
+    const { wallet } = this.requireWallet();
+    const rules = await this.fetchAllRules(wallet);
+    return hintContextRuleIds(
+      authEntry.rootInvocation(),
+      rules,
+      options?.defaultRuleId ?? 0
+    );
+  }
+
+  /**
+   * Resolve context rule IDs for every auth_context in an auth entry's
+   * invocation tree by matching each node to the most specific on-chain rule.
+   *
+   * This is a convenience wrapper around `hintContextRuleIds` that returns
+   * only the suggested IDs, ready to pass directly as `contextRuleIds`.
+   *
+   * **When to use `resolveContextRuleIds` vs `hintContextRuleIds`:**
+   * - Use `resolveContextRuleIds` when the automatic selection is unambiguous
+   *   and you trust the most-specific-match heuristic.
+   * - Use `hintContextRuleIds` when you need to inspect `matchingRules` to
+   *   detect ambiguity or override individual suggestions.
+   *
+   * **How to use:**
+   * ```typescript
+   * // Simulate → get auth entry → resolve → sign
+   * const simResult = await kit.rpc.simulateTransaction(tx);
+   * const authEntry = simResult.result!.auth[0];
+   *
+   * const contextRuleIds = await kit.resolveContextRuleIds(authEntry);
+   * // e.g. [1, 0] for a deposit→transfer invocation tree
+   *
+   * await kit.signAndSubmit(assembledTx, { contextRuleIds });
+   * ```
+   *
+   * @param authEntry - A smart-account auth entry (from simulation result)
+   * @param options.defaultRuleId - Rule ID used when no rule explicitly matches (default 0)
+   * @returns Array of rule IDs, one per auth_context, ready to use as `contextRuleIds`
+   */
+  async resolveContextRuleIds(
+    authEntry: xdr.SorobanAuthorizationEntry,
+    options?: { defaultRuleId?: number }
+  ): Promise<number[]> {
+    const hints = await this.hintContextRuleIds(authEntry, options);
+    return hints.map((h) => h.suggestedRuleId);
+  }
+
+  /**
+   * Fetch all on-chain context rules for the connected wallet.
+   * @internal
+   */
+  private async fetchAllRules(wallet: SmartAccountClient): Promise<ContextRule[]> {
+    const countResult = await wallet.get_context_rules_count();
+    const count = countResult.result ?? 0;
+    const rules: ContextRule[] = [];
+    for (let i = 0; i < count; i++) {
+      try {
+        const ruleResult = await wallet.get_context_rule({ context_rule_id: i });
+        if (ruleResult.result) rules.push(ruleResult.result);
+      } catch {
+        // rule may have been removed; skip
+      }
+    }
+    return rules;
   }
 }

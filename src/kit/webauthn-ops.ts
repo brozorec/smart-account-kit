@@ -25,6 +25,7 @@ import {
   extractPublicKeyFromAttestation,
   generateChallenge,
 } from "../utils";
+import { validateContextRuleIds } from "./invocation-utils";
 
 type ContractSignerId = ContractSigner;
 
@@ -130,6 +131,7 @@ export async function signAuthEntry(
   credentials.signatureExpirationLedger(expiration);
 
   const contextRuleIds = options?.contextRuleIds ?? [0];
+  validateContextRuleIds(contextRuleIds, normalizedEntry.rootInvocation());
 
   const preimage = xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(
     new xdr.HashIdPreimageSorobanAuthorization({

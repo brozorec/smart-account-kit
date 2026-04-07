@@ -23,6 +23,7 @@ import type { SelectedSigner, SubmissionOptions, TransactionResult } from "../ty
 import { BASE_FEE, AUTH_ENTRY_EXPIRATION_BUFFER } from "../constants";
 import { getCredentialIdFromSigner, collectUniqueSigners } from "../builders";
 import { buildAuthPayloadScVal, getSignersMapFromAuthPayload } from "../kit/webauthn-ops";
+import { validateContextRuleIds } from "../kit/invocation-utils";
 
 /** Type guard for transaction result with status and hash properties */
 interface SendTransactionResult {
@@ -264,6 +265,9 @@ export class MultiSignerManager {
           let signedEntry = xdr.SorobanAuthorizationEntry.fromXDR(entry.toXDR());
           signedEntry.credentials().address().signatureExpirationLedger(expiration);
 
+          const contextRuleIds = options?.contextRuleIds ?? [0];
+          validateContextRuleIds(contextRuleIds, signedEntry.rootInvocation());
+
           // Sign with passkeys
           for (let i = 0; i < passkeySigners.length; i++) {
             const passkeySigner = passkeySigners[i];
@@ -271,11 +275,9 @@ export class MultiSignerManager {
             signedEntry = await this.deps.signAuthEntry(signedEntry, {
               credentialId: passkeySigner?.credentialId,
               expiration,
-              contextRuleIds: options?.contextRuleIds ?? [0],
+              contextRuleIds,
             });
           }
-
-          const contextRuleIds = options?.contextRuleIds ?? [0];
 
           // Add delegated signers to signature map
           for (const walletSigner of walletSigners) {

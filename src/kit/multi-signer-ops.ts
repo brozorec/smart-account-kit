@@ -4,6 +4,7 @@ import { rpc } from "@stellar/stellar-sdk";
 import { Address, Keypair, Operation, TransactionBuilder, Transaction, hash, xdr } from "@stellar/stellar-sdk";
 import { BASE_FEE, AUTH_ENTRY_EXPIRATION_BUFFER, STROOPS_PER_XLM } from "../constants";
 import { buildAuthPayloadScVal, getSignersMapFromAuthPayload } from "./webauthn-ops";
+import { validateContextRuleIds } from "./invocation-utils";
 
 export async function multiSignersTransfer(
   deps: {
@@ -123,6 +124,7 @@ export async function multiSignersTransfer(
         signedEntry.credentials().address().signatureExpirationLedger(expiration);
 
         const contextRuleIds = options?.contextRuleIds ?? [0];
+        validateContextRuleIds(contextRuleIds, signedEntry.rootInvocation());
 
         for (let i = 0; i < passkeySigners.length; i++) {
           const passkeySigner = passkeySigners[i];

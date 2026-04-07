@@ -195,7 +195,24 @@ export interface CredentialManager {
 export interface MultiSignerOptions {
   /** Logger function */
   onLog?: (message: string, type?: "info" | "success" | "error") => void;
-  /** Context rule IDs to authorize against (defaults to [0]) */
+  /**
+   * Context rule IDs for the invocation being authorized, one per auth_context.
+   *
+   * The `AuthPayload.context_rule_ids` array must be aligned by index with the
+   * `auth_contexts` passed to `__check_auth`. Each node in the depth-first
+   * traversal of the `SorobanAuthorizedInvocation` tree produces one
+   * auth_context, so this array must have exactly that many entries.
+   *
+   * Simple transfer (1 node) → `[0]`
+   * Deposit that calls transfer (2 nodes) → `[ruleForDeposit, ruleForTransfer]`
+   *
+   * Use `kit.hintContextRuleIds(authEntry)` to get per-node suggestions from
+   * on-chain rules, or `kit.resolveContextRuleIds(authEntry)` to get the
+   * suggested IDs directly.
+   *
+   * Passing the wrong number of IDs will throw before any WebAuthn prompt,
+   * with a message showing the full invocation tree and the expected count.
+   */
   contextRuleIds?: number[];
 }
 
