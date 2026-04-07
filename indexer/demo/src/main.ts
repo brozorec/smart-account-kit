@@ -25,7 +25,6 @@ interface SmartAccountInfo {
   contextRuleCount: number;
   externalSignerCount: number;
   delegatedSignerCount: number;
-  nativeSignerCount: number;
   firstSeenLedger: number;
   lastSeenLedger: number;
   contextRuleIds: number[];
@@ -41,7 +40,6 @@ interface SignerInfo {
 
 interface PolicyInfo {
   policy_address: string;
-  install_params: any;
 }
 
 interface ContextRuleInfo {
@@ -257,7 +255,6 @@ async function lookupContractsByCredentialId(
     contextRuleCount: parseInt(c.context_rule_count),
     externalSignerCount: parseInt(c.external_signer_count),
     delegatedSignerCount: parseInt(c.delegated_signer_count),
-    nativeSignerCount: parseInt(c.native_signer_count || "0"),
     firstSeenLedger: parseInt(c.first_seen_ledger),
     lastSeenLedger: parseInt(c.last_seen_ledger),
     contextRuleIds: c.context_rule_ids,
@@ -282,7 +279,6 @@ async function lookupContractsByAddress(
     contextRuleCount: parseInt(c.context_rule_count),
     externalSignerCount: parseInt(c.external_signer_count),
     delegatedSignerCount: parseInt(c.delegated_signer_count),
-    nativeSignerCount: parseInt(c.native_signer_count || "0"),
     firstSeenLedger: parseInt(c.first_seen_ledger),
     lastSeenLedger: parseInt(c.last_seen_ledger),
     contextRuleIds: c.context_rule_ids,
@@ -411,7 +407,6 @@ async function renderContractDetails(details: ContractDetails) {
     // Group signers by type
     const externalSigners = rule.signers.filter((s: SignerInfo) => s.signer_type === 'External');
     const delegatedSigners = rule.signers.filter((s: SignerInfo) => s.signer_type === 'Delegated');
-    const nativeSigners = rule.signers.filter((s: SignerInfo) => s.signer_type === 'Native');
 
     // Render External signers (passkeys) - group by verifier
     if (externalSigners.length > 0) {
@@ -473,30 +468,6 @@ async function renderContractDetails(details: ContractDetails) {
       `;
     }
 
-    // Render Native signers
-    if (nativeSigners.length > 0) {
-      html += `
-        <div class="signer-group">
-          <div class="signer-group-header">
-            <span class="signer-type Native">Native</span>
-          </div>
-          <div class="signer-group-items">
-      `;
-      for (const signer of nativeSigners) {
-        const isMyAddress = currentSignerAddress && signer.signer_address === currentSignerAddress;
-        html += `
-          <div class="credential-item ${isMyAddress ? 'highlight' : ''}">
-            ${isMyAddress ? '<span class="you-badge">YOU</span>' : ''}
-            <span class="address-full">${signer.signer_address}</span>
-          </div>
-        `;
-      }
-      html += `
-          </div>
-        </div>
-      `;
-    }
-
     // Render Policies
     if (rule.policies && rule.policies.length > 0) {
       html += `
@@ -507,12 +478,9 @@ async function renderContractDetails(details: ContractDetails) {
           <div class="signer-group-items">
       `;
       for (const policy of rule.policies) {
-        // Try RPC params first, fall back to indexer params
         const mapKey = `${rule.context_rule_id}:${policy.policy_address}`;
         const rpcParams = policyParams.get(mapKey);
-        const params = rpcParams
-          ? formatPolicyParamsFromRpc(rpcParams)
-          : formatPolicyParams(policy.install_params);
+        const params = rpcParams ? formatPolicyParamsFromRpc(rpcParams) : '';
         html += `
           <div class="credential-item">
             <span class="address-full">${policy.policy_address}</span>
@@ -530,19 +498,6 @@ async function renderContractDetails(details: ContractDetails) {
   }
 
   contractDetailsEl.innerHTML = html;
-}
-
-function formatPolicyParams(params: any): string {
-  if (!params || !params.map) return '';
-  const parts: string[] = [];
-  for (const item of params.map) {
-    const key = item.key?.symbol;
-    const val = item.val?.u32 ?? item.val?.i128;
-    if (key && val !== undefined) {
-      parts.push(`${key}: ${val}`);
-    }
-  }
-  return parts.join(', ');
 }
 
 function hideContractDetails() {

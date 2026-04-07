@@ -88,12 +88,17 @@ function App() {
   const [pendingTransfer, setPendingTransfer] = useState<{
     recipient: string;
     amount: number;
+    ruleId: number;
   } | null>(null);
 
   // All signers from on-chain context rules
   const [allSigners, setAllSigners] = useState<Signer[]>([]);
   const [activeSigner, setActiveSigner] = useState<Signer | null>(null);
   const [credentialId, setCredentialIdState] = useState<string | null>(null);
+
+  // Context rules for transfer authorization
+  const [allContextRules, setAllContextRules] = useState<ContextRule[]>([]);
+  const [selectedTransferRuleId, setSelectedTransferRuleId] = useState<number>(0);
 
   // External wallet connection - managed by SDK
   const [connectedWallets, setConnectedWallets] = useState<ConnectedWallet[]>([]);
@@ -185,11 +190,28 @@ function App() {
     }
   }, []);
 
-  // Fetch all unique signers from on-chain context rules using SDK
-  const fetchAllSigners = useCallback(async (kitInstance: SmartAccountKit, activeCredId: string | null) => {
+  // Fetch all context rules for the transfer rule selector
+  const fetchContextRules = useCallback(async (kitInstance: SmartAccountKit) => {
     try {
-      // Use SDK's multiSigners to get deduplicated signers from all rules
-      const uniqueSigners = await kitInstance.multiSigners.getAvailableSigners();
+      const countTx = await kitInstance.rules.getCount();
+      const count = countTx.result ?? 0;
+      const fetched: ContextRule[] = [];
+      for (let i = 0; i < count; i++) {
+        try {
+          const ruleTx = await kitInstance.rules.get(i);
+          if (ruleTx.result) fetched.push(ruleTx.result);
+        } catch {}
+      }
+      setAllContextRules(fetched);
+    } catch (error) {
+      console.warn("Failed to fetch context rules:", error);
+    }
+  }, []);
+
+  // Fetch signers from a specific on-chain context rule
+  const fetchAllSigners = useCallback(async (kitInstance: SmartAccountKit, activeCredId: string | null, ruleId: number = 0) => {
+    try {
+      const uniqueSigners = await kitInstance.multiSigners.getAvailableSigners(ruleId);
       setAllSigners(uniqueSigners);
 
       // Find the active signer based on credential ID
@@ -291,13 +313,14 @@ function App() {
         setIsConnected(true);
         fetchBalance(result.contractId);
         fetchAllSigners(kit, result.credentialId);
+        fetchContextRules(kit);
       }
     };
 
     autoConnect().catch((error) => {
       log(`Auto-connect failed: ${error}`, "error");
     });
-  }, [kit, configValid, isConnected, autoConnectAttempted, log, fetchBalance, fetchAllSigners]);
+  }, [kit, configValid, isConnected, autoConnectAttempted, log, fetchBalance, fetchAllSigners, fetchContextRules]);
 
   const handleCreateWallet = async () => {
     if (!kit) return;
@@ -322,6 +345,7 @@ function App() {
         setIsConnected(true);
         fetchBalance(result.contractId);
         fetchAllSigners(kit, result.credentialId);
+        fetchContextRules(kit);
         // Session is automatically saved by the kit
       } else if (result.submitResult) {
         log(`Deployment failed: ${result.submitResult.error}`, "error");
@@ -374,6 +398,7 @@ function App() {
           setIsConnected(true);
           fetchBalance(result.contractId);
           fetchAllSigners(kit, result.credentialId);
+          fetchContextRules(kit);
         }
         return;
       }
@@ -391,6 +416,7 @@ function App() {
         setIsConnected(true);
         fetchBalance(result.contractId);
         fetchAllSigners(kit, result.credentialId);
+        fetchContextRules(kit);
       }
     } catch (error) {
       log(`Failed to connect: ${error}`, "error");
@@ -421,6 +447,7 @@ function App() {
         setIsConnected(true);
         fetchBalance(result.contractId);
         fetchAllSigners(kit, result.credentialId);
+        fetchContextRules(kit);
       }
     } catch (error) {
       log(`Failed to connect: ${error}`, "error");
@@ -441,6 +468,8 @@ function App() {
     setIsConnected(false);
     setAllSigners([]);
     setActiveSigner(null);
+    setAllContextRules([]);
+    setSelectedTransferRuleId(0);
     // Session is automatically cleared by the kit
     log("Disconnected from wallet");
   };
@@ -460,27 +489,37 @@ function App() {
       return;
     }
 
+    const ruleId = selectedTransferRuleId;
+
     // Check if we have multiple signers available
     // If so, show the signer picker to let user choose
     if (allSigners.length > 1) {
       log("Multiple signers available - select signers for this transaction");
-      setPendingTransfer({ recipient, amount });
+      setPendingTransfer({ recipient, amount, ruleId });
       setSignerPickerOpen(true);
       return;
     }
 
-    // Single signer - use the standard flow
     setLoading("Building transfer...");
     log(`Transferring ${amount} XLM to ${recipient.slice(0, 10)}...`);
     log(`From smart wallet: ${contractId}`, "info");
 
     try {
-      // Use the kit's transfer helper - handles simulation, signing, and submission
-      const result = await kit.transfer(
-        CONFIG.nativeTokenContract,
-        recipient,
-        amount
-      );
+      let result;
+      if (ruleId !== 0 && allSigners.length === 1) {
+        // Non-default rule with single signer: use multiSigners.transfer() to specify contextRuleIds
+        const selectedSigners = kit.multiSigners.buildSelectedSigners(allSigners);
+        result = await kit.multiSigners.transfer(
+          CONFIG.nativeTokenContract,
+          recipient,
+          amount,
+          selectedSigners,
+          { onLog: log, contextRuleIds: [ruleId] }
+        );
+      } else {
+        // Default rule (0): use the standard single-signer transfer
+        result = await kit.transfer(CONFIG.nativeTokenContract, recipient, amount);
+      }
 
       if (result.success) {
         log(`Transfer successful! Sent ${amount} XLM to ${recipient.slice(0, 10)}...`, "success");
@@ -500,7 +539,7 @@ function App() {
   const handleSignerConfirm = async (selectedSigners: SelectedSigner[]) => {
     if (!kit || !pendingTransfer || !contractId) return;
 
-    const { recipient, amount } = pendingTransfer;
+    const { recipient, amount, ruleId } = pendingTransfer;
     setPendingTransfer(null);
 
     setLoading("Building multi-signer transfer...");
@@ -516,6 +555,7 @@ function App() {
         selectedSigners,
         {
           onLog: log,
+          contextRuleIds: [ruleId],
         }
       );
 
@@ -579,6 +619,7 @@ function App() {
         setIsConnected(true);
         fetchBalance(result.contractId);
         fetchAllSigners(kit, credential.credentialId);
+        fetchContextRules(kit);
         // Session is automatically saved by the kit
         // Refresh pending list
         setPendingCredentials(await kit.credentials.getPending());
@@ -632,7 +673,8 @@ function App() {
     // Force re-fetch of context rules and signers
     setContextRulesKey((prev) => prev + 1);
     if (kit) {
-      fetchAllSigners(kit, credentialId);
+      fetchAllSigners(kit, credentialId, selectedTransferRuleId);
+      fetchContextRules(kit);
       // Refresh pending credentials (some may have been deployed)
       setPendingCredentials(await kit.credentials.getPending());
     }
@@ -946,6 +988,30 @@ function App() {
               placeholder="10"
             />
           </div>
+          {allContextRules.length > 1 && (
+            <div className="form-group">
+              <label>Authorize with Rule</label>
+              <div className="rule-select-wrapper">
+                <select
+                  className="rule-select"
+                  value={selectedTransferRuleId}
+                  onChange={(e) => {
+                    const ruleId = Number(e.target.value);
+                    setSelectedTransferRuleId(ruleId);
+                    if (kit) {
+                      fetchAllSigners(kit, credentialId, ruleId);
+                    }
+                  }}
+                >
+                  {allContextRules.map((rule) => (
+                    <option key={rule.id} value={rule.id}>
+                      #{rule.id} {rule.name || "Default"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
           <div className="button-group">
             <button
               onClick={handleTransfer}

@@ -75,11 +75,6 @@
       "optional": true
     }
   },
-  "pnpm": {
-    "overrides": {
-      "@stellar/stellar-sdk": "$@stellar/stellar-sdk"
-    }
-  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"

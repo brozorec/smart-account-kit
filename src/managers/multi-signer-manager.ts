@@ -43,6 +43,8 @@ function isSendTransactionResult(value: unknown): value is SendTransactionResult
 export interface MultiSignerOptions {
   /** Logger function */
   onLog?: (message: string, type?: "info" | "success" | "error") => void;
+  /** Context rule IDs to authorize against (defaults to [0]) */
+  contextRuleIds?: number[];
 }
 
 /** Dependencies required by MultiSignerManager */

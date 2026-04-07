@@ -60,16 +60,19 @@ export function ContextRulesPanel({
 
     setLoading(true);
     try {
-      // Fetch Default context rules
-      const defaultRulesResult = await kit.rules.getAll({
-        tag: "Default",
-        values: undefined,
-      });
-      const defaultRules = defaultRulesResult.result || [];
+      const countTx = await kit.rules.getCount();
+      const count = countTx.result ?? 0;
 
-      // Note: In a full implementation, you'd also fetch CallContract and CreateContract rules
-      // For now, just showing Default rules as that's the most common case
-      setRules(defaultRules);
+      const fetched: ContextRule[] = [];
+      for (let i = 0; i < count; i++) {
+        try {
+          const ruleTx = await kit.rules.get(i);
+          if (ruleTx.result) fetched.push(ruleTx.result);
+        } catch {
+          // rule may have been removed, skip
+        }
+      }
+      setRules(fetched);
     } catch (error) {
       onLog(`Failed to fetch context rules: ${error}`, "error");
     } finally {

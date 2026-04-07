@@ -238,6 +238,38 @@ async function findKeyDataByCredentialId(
     return buildKeyData(credential.publicKey, credentialId);
   }
 
+  // Fallback: scan on-chain context rules for an External signer matching this credential ID
+  try {
+    const { extractCredentialIdFromKeyData } = await import("../utils");
+    const { wallet } = requireWallet();
+    const credentialIdBuffer = base64url.toBuffer(credentialId);
+    const countTx = await wallet.get_context_rules_count();
+    const count = countTx.result ?? 0;
+    for (let i = 0; i < count; i++) {
+      try {
+        const ruleTx = await wallet.get_context_rule({ context_rule_id: i });
+        const rule = ruleTx.result;
+        if (!rule) continue;
+        for (const signer of rule.signers) {
+          if (
+            signer.tag === "External" &&
+            signer.values[0] === webauthnVerifierAddress
+          ) {
+            const onChainKeyData = signer.values[1] as Buffer;
+            const onChainCredId = extractCredentialIdFromKeyData(onChainKeyData);
+            if (onChainCredId.equals(credentialIdBuffer)) {
+              return onChainKeyData;
+            }
+          }
+        }
+      } catch {
+        // rule may have been removed, skip
+      }
+    }
+  } catch {
+    // on-chain lookup failed, fall through to error
+  }
+
   throw new Error(
     `No key data found for credential ID: ${credentialId}. ` +
     `Ensure the credential was stored with keyData (credentials created before SDK v0.3.0 may need to be re-registered).`

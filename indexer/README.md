@@ -54,7 +54,6 @@ wrangler deploy
 
 ```bash
 cd goldsky
-goldsky pipeline create smart-account-signers --definition-path ./pipeline.yaml
 goldsky pipeline start smart-account-signers
 ```
 

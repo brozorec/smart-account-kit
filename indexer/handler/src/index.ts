@@ -27,7 +27,6 @@ interface ContractSummary {
   context_rule_count: number;
   external_signer_count: number;
   delegated_signer_count: number;
-  native_signer_count: number;
   first_seen_ledger: number;
   last_seen_ledger: number;
   context_rule_ids: number[];
@@ -65,7 +64,6 @@ app.get("/api/lookup/:credentialId", async (c) => {
         cs.context_rule_count,
         cs.external_signer_count,
         cs.delegated_signer_count,
-        cs.native_signer_count,
         cs.first_seen_ledger,
         cs.last_seen_ledger,
         cs.context_rule_ids
@@ -102,7 +100,6 @@ app.get("/api/lookup/address/:signerAddress", async (c) => {
         cs.context_rule_count,
         cs.external_signer_count,
         cs.delegated_signer_count,
-        cs.native_signer_count,
         cs.first_seen_ledger,
         cs.last_seen_ledger,
         cs.context_rule_ids
@@ -176,7 +173,7 @@ app.get("/api/contract/:contractId", async (c) => {
         ORDER BY context_rule_id, signer_type, COALESCE(signer_address, ''), COALESCE(credential_id, ''), ledger_sequence DESC
       )
       SELECT * FROM latest_signer_events
-      WHERE event_type IN (${EVENT_TYPES.CONTEXT_RULE_ADDED}, ${EVENT_TYPES.SIGNER_ADDED})
+      WHERE event_type = ${EVENT_TYPES.SIGNER_ADDED}
       ORDER BY context_rule_id, signer_type, ledger_sequence
     `;
 
@@ -186,7 +183,6 @@ app.get("/api/contract/:contractId", async (c) => {
         SELECT DISTINCT ON (context_rule_id, policy_address)
           context_rule_id,
           policy_address,
-          install_params,
           event_type,
           ledger_sequence
         FROM processed_policies
@@ -194,7 +190,7 @@ app.get("/api/contract/:contractId", async (c) => {
         ORDER BY context_rule_id, policy_address, ledger_sequence DESC
       )
       SELECT * FROM latest_policy_events
-      WHERE event_type IN (${EVENT_TYPES.POLICY_ADDED}, ${EVENT_TYPES.CONTEXT_RULE_ADDED})
+      WHERE event_type = ${EVENT_TYPES.POLICY_ADDED}
       ORDER BY context_rule_id, ledger_sequence
     `;
 
@@ -234,7 +230,6 @@ app.get("/api/contract/:contractId", async (c) => {
       }
       contextRules[ruleId].policies.push({
         policy_address: policy.policy_address,
-        install_params: policy.install_params,
       });
     }
 
