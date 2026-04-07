@@ -53,8 +53,8 @@ ON smart_account_signer_events(ledger_sequence);
 CREATE OR REPLACE VIEW signer_registry AS
 SELECT
   e.contract_id,
-  (SELECT (elem->'val'->>'u32')::int FROM jsonb_array_elements(e.data::jsonb->'map') elem WHERE elem->'key'->>'symbol' = 'signer_id') as signer_id,
-  (SELECT elem->'val'->'vec' FROM jsonb_array_elements(e.data::jsonb->'map') elem WHERE elem->'key'->>'symbol' = 'signer') as signer_vec,
+  (e.topics::jsonb->1->>'u32')::int as signer_id,
+  e.data::jsonb->'vec' as signer_vec,
   e.ledger_sequence
 FROM smart_account_signer_events e
 WHERE e.event_type = 'signer_registered';
@@ -67,8 +67,8 @@ WHERE e.event_type = 'signer_registered';
 CREATE OR REPLACE VIEW policy_registry AS
 SELECT
   e.contract_id,
-  (SELECT (elem->'val'->>'u32')::int FROM jsonb_array_elements(e.data::jsonb->'map') elem WHERE elem->'key'->>'symbol' = 'policy_id') as policy_id,
-  (SELECT elem->'val'->>'address' FROM jsonb_array_elements(e.data::jsonb->'map') elem WHERE elem->'key'->>'symbol' = 'policy') as policy_address,
+  (e.topics::jsonb->1->>'u32')::int as policy_id,
+  e.data::jsonb->>'address' as policy_address,
   e.ledger_sequence
 FROM smart_account_signer_events e
 WHERE e.event_type = 'policy_registered';
@@ -88,7 +88,7 @@ WITH signer_events AS (
     e.transaction_hash,
     e.event_type,
     (e.topics::jsonb->1->>'u32')::int as context_rule_id,
-    (SELECT (elem->'val'->>'u32')::int FROM jsonb_array_elements(e.data::jsonb->'map') elem WHERE elem->'key'->>'symbol' = 'signer_id') as signer_id
+    (e.data::jsonb->'vec'->0->>'u32')::int as signer_id
   FROM smart_account_signer_events e
   WHERE e.event_type IN ('signer_added', 'signer_removed')
 )
@@ -128,7 +128,7 @@ WITH policy_events AS (
     e.transaction_hash,
     e.event_type,
     (e.topics::jsonb->1->>'u32')::int as context_rule_id,
-    (SELECT (elem->'val'->>'u32')::int FROM jsonb_array_elements(e.data::jsonb->'map') elem WHERE elem->'key'->>'symbol' = 'policy_id') as policy_id
+    (e.data::jsonb->'vec'->0->>'u32')::int as policy_id
   FROM smart_account_signer_events e
   WHERE e.event_type IN ('policy_added', 'policy_removed')
 )
