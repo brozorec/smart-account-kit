@@ -12,10 +12,19 @@ All reviews in this changelog are internal engineering reviews unless a linked r
   stellar-accounts `SelfDelegatedSigner` (#3018). Wallets running `1b5f4534…` do not enforce it
   on-chain
   ([GHSA-jpg9-m7w4-c7wc](https://github.com/OpenZeppelin/stellar-contracts/security/advisories/GHSA-jpg9-m7w4-c7wc)).
-- `kit.upgrade()` refuses a target that is missing from `acceptedWasmHashes`.
+- `kit.upgrade()` refuses a target that is missing from `acceptedWasmHashes` or has no known
+  authorization digest scheme, and wallet deployment refuses an `accountWasmHash` without one.
+- `computeEntryAuthDigest` takes a required digest scheme and also returns the delegated
+  `__check_auth` arguments.
 
 ### Added
 
+- Support the stellar-accounts v0.8.0 `AuthDigestPreimage` digest (`preimage-v1`) next to the
+  deployed `legacy-concat` digest. The SDK picks the scheme from the wallet's current WASM hash
+  before every signature and fails closed with `AuthDigestSchemeError` for unknown code.
+- Add the `authDigestSchemes` config option. Built-in entries cover `1b5f4534…` and
+  stellar-accounts v0.7.3 (`203e2970…`) as `legacy-concat`, and v0.8.0 (`c514d35e…`) as
+  `preimage-v1`.
 - Decode contract errors `DelegatedSignerIsContextContract` (#3017) and `SelfDelegatedSigner`
   (#3018).
 

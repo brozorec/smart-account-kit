@@ -1,13 +1,16 @@
 /**
  * Smart-account signer abstraction and the Ed25519 signer.
  *
- * All smart-account signers authenticate the SAME Protocol 27 auth digest:
+ * All smart-account signers on an auth entry authenticate the SAME auth digest.
+ * Its formula depends on the wallet's {@link AuthDigestScheme}:
  *
- *   signature_payload = sha256(P27 auth preimage)          // see auth-payload.ts
- *   auth_digest       = sha256(signature_payload ++ scvVec(context_rule_ids).toXDR())
+ *   signature_payload = sha256(HashIdPreimage)                // see auth-payload.ts
+ *   legacy-concat:  auth_digest = sha256(signature_payload ++ scvVec(context_rule_ids).toXDR())
+ *   preimage-v1:    auth_digest = sha256(AuthDigestPreimage {
+ *                     account, signature_payload, context_rule_ids }.toXDR())
  *
  * The auth digest binds the context rule ids, so rule selection cannot change
- * after signing.
+ * after signing. `preimage-v1` also binds the smart account address.
  *
  * A signature-bearing signer (WebAuthn passkey, Ed25519) contributes bytes into
  * the AuthPayload `signers` map keyed by its on-chain {@link ContractSigner}:
@@ -16,20 +19,41 @@
  *   verifier reads it as `BytesN<64>` and checks it against the 32-byte key.
  *
  * Delegated (G-address) signers do NOT contribute AuthPayload bytes; their auth
- * is a nested `require_auth_for_args((auth_digest,))` handled in the multi-signer
- * path. They are therefore modelled separately from {@link AuthDigestSigner}.
+ * is a nested `require_auth_for_args` handled in the multi-signer path, over
+ * `(auth_digest,)` for `legacy-concat` and `(preimage,)` for `preimage-v1`.
+ * They are therefore modelled separately from {@link AuthDigestSigner}.
  *
  * @packageDocumentation
  */
 
 import { Keypair, xdr } from "@stellar/stellar-sdk";
 import type { Signer as ContractSigner } from "smart-account-kit-bindings";
-import { buildAuthDigest, buildSignaturePayload } from "./kit/auth-payload.js";
+import {
+  buildAuthDigestPreimage,
+  buildLegacyAuthDigest,
+  buildPreimageAuthDigest,
+  buildSignaturePayload,
+  getAuthEntryAddress,
+} from "./kit/auth-payload.js";
+import {
+  AUTH_DIGEST_SCHEMES,
+  type AuthDigestScheme,
+} from "./kit/auth-digest-scheme.js";
 import { SmartAccountErrorCode, ValidationError } from "./errors.js";
 import { ED25519_PUBLIC_KEY_SIZE, ED25519_SIGNATURE_SIZE } from "./constants.js";
 
+/** The digest material every signer on one auth entry commits to. */
+export interface EntryAuthDigest {
+  /** The host `signature_payload` passed to `__check_auth`. */
+  signaturePayload: Buffer;
+  /** The 32-byte digest that External signers sign. */
+  authDigest: Buffer;
+  /** The `__check_auth` arguments that Delegated signers authorize. */
+  delegatedAuthArgs: xdr.ScVal[];
+}
+
 /**
- * Compute the Protocol 27 signature payload and auth digest for an auth entry.
+ * Compute the signature payload and auth digest for a smart-account auth entry.
  *
  * Single source of truth for the auth-digest formula shared by every signer
  * type. Note: like {@link buildSignaturePayload}, this normalizes and writes the
@@ -39,16 +63,48 @@ import { ED25519_PUBLIC_KEY_SIZE, ED25519_SIGNATURE_SIZE } from "./constants.js"
  * @param entry - The Soroban auth entry being signed
  * @param expiration - Signature expiration ledger
  * @param contextRuleIds - Context rule ids bound into the digest
+ * @param scheme - The digest scheme of the code the smart account runs
+ * @throws {ValidationError} If `scheme` is not a known scheme
  */
 export function computeEntryAuthDigest(
   networkPassphrase: string,
   entry: xdr.SorobanAuthorizationEntry,
   expiration: number,
-  contextRuleIds: number[]
-): { signaturePayload: Buffer; authDigest: Buffer } {
+  contextRuleIds: number[],
+  scheme: AuthDigestScheme
+): EntryAuthDigest {
   const signaturePayload = buildSignaturePayload(networkPassphrase, entry, expiration);
-  const authDigest = buildAuthDigest(signaturePayload, contextRuleIds);
-  return { signaturePayload, authDigest };
+
+  switch (scheme) {
+    case "legacy-concat": {
+      const authDigest = buildLegacyAuthDigest(signaturePayload, contextRuleIds);
+      return {
+        signaturePayload,
+        authDigest,
+        delegatedAuthArgs: [xdr.ScVal.scvBytes(authDigest)],
+      };
+    }
+    case "preimage-v1": {
+      const preimage = buildAuthDigestPreimage(
+        getAuthEntryAddress(entry),
+        signaturePayload,
+        contextRuleIds
+      );
+      return {
+        signaturePayload,
+        authDigest: buildPreimageAuthDigest(preimage),
+        delegatedAuthArgs: [preimage],
+      };
+    }
+    default: {
+      const unknown: never = scheme;
+      throw new ValidationError(
+        `Unknown authorization digest scheme: ${String(unknown)}. Expected one of ${AUTH_DIGEST_SCHEMES.join(", ")}.`,
+        SmartAccountErrorCode.INVALID_INPUT,
+        { scheme: unknown }
+      );
+    }
+  }
 }
 
 /**

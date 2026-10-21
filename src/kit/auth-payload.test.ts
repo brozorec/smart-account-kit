@@ -9,7 +9,7 @@ import {
 import { describe, expect, it } from "vitest";
 import type { AuthPayload, Signer } from "smart-account-kit-bindings";
 import {
-  buildAuthDigest,
+  buildLegacyAuthDigest,
   buildAddressSignatureScVal,
   buildSignaturePreimage,
   buildSignaturePayload,
@@ -258,11 +258,11 @@ describe("auth-payload", () => {
     expect(Array.from(payload.signers.values())[0]).toEqual(Buffer.from("bb", "hex"));
   });
 
-  it("binds context rule ids into the auth digest", () => {
+  it("binds context rule ids into the legacy auth digest", () => {
     const signaturePayload = hash(Buffer.from("payload"));
 
-    const digestA = buildAuthDigest(signaturePayload, [1]);
-    const digestB = buildAuthDigest(signaturePayload, [2]);
+    const digestA = buildLegacyAuthDigest(signaturePayload, [1]);
+    const digestB = buildLegacyAuthDigest(signaturePayload, [2]);
 
     expect(digestA.equals(digestB)).toBe(false);
 

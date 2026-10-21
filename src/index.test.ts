@@ -16,4 +16,16 @@ describe("package root exports", () => {
     expect(typeof sdk.getSignerKey).toBe("function");
     expect(typeof sdk.collectUniqueSigners).toBe("function");
   });
+
+  it("exports the authorization digest scheme surface", () => {
+    expect(sdk.AUTH_DIGEST_SCHEMES).toEqual(["legacy-concat", "preimage-v1"]);
+    expect(
+      sdk.KNOWN_AUTH_DIGEST_SCHEMES[
+        "1b5f4534a76322da2ad7c745f6900857a6802b0ca79850c35a03561df997785a"
+      ]
+    ).toBe("legacy-concat");
+    expect(new sdk.AuthDigestSchemeError("C1", "ab").code).toBe(
+      sdk.SmartAccountErrorCode.AUTH_DIGEST_SCHEME_UNKNOWN
+    );
+  });
 });

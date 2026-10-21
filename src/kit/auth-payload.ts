@@ -194,7 +194,8 @@ export function createAddressCredentials(
   return xdr.SorobanCredentials.sorobanCredentialsAddress(credentials);
 }
 
-export function buildAuthDigest(
+/** The `legacy-concat` digest: `sha256(signature_payload ++ scvVec(ids).toXDR())`. */
+export function buildLegacyAuthDigest(
   signaturePayload: Buffer,
   contextRuleIds: number[]
 ): Buffer {
@@ -203,6 +204,44 @@ export function buildAuthDigest(
   ).toXDR();
 
   return hash(Buffer.concat([signaturePayload, ruleIdsXdr]));
+}
+
+/**
+ * Encode the `AuthDigestPreimage` contract struct that `preimage-v1` signers
+ * commit to. Struct fields encode as an ScMap with symbol keys in name order.
+ */
+export function buildAuthDigestPreimage(
+  account: string,
+  signaturePayload: Buffer,
+  contextRuleIds: number[]
+): xdr.ScVal {
+  if (signaturePayload.length !== 32) {
+    throw new Error(
+      `Signature payload must be 32 bytes (got ${signaturePayload.length})`
+    );
+  }
+
+  return xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol("account"),
+      val: xdr.ScVal.scvAddress(Address.fromString(account).toScAddress()),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol("context_rule_ids"),
+      val: xdr.ScVal.scvVec(
+        contextRuleIds.map((contextRuleId) => xdr.ScVal.scvU32(contextRuleId))
+      ),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol("signature_payload"),
+      val: xdr.ScVal.scvBytes(signaturePayload),
+    }),
+  ]);
+}
+
+/** The `preimage-v1` digest: `sha256(preimage.toXDR())`. */
+export function buildPreimageAuthDigest(preimage: xdr.ScVal): Buffer {
+  return hash(preimage.toXDR());
 }
 
 export function buildWebAuthnSignatureBytes(sigData: WebAuthnSigData): Buffer {
