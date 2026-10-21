@@ -77,6 +77,23 @@ describe("validateSigners", () => {
     );
   });
 
+  it("rejects a delegated signer that is the smart account itself", () => {
+    const account = "CACCOUNT";
+    const self: ContractSigner = { tag: "Delegated", values: [account] };
+
+    expect(() => validateSigner(self, account)).toThrow(ValidationError);
+    expect(() => validateSigners([delegated(1), self], 0, account)).toThrow(
+      "cannot be its own delegated signer"
+    );
+    expect(() =>
+      validateContextRule({ name: "self", signers: [self], policyCount: 0, account })
+    ).toThrow(ValidationError);
+  });
+
+  it("skips the self-delegation check without an account", () => {
+    expect(() => validateSigner({ tag: "Delegated", values: ["CACCOUNT"] })).not.toThrow();
+  });
+
   it("rejects the shared default deployer as a delegated signer", () => {
     expect(() =>
       validateSigner({

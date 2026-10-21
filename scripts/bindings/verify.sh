@@ -16,9 +16,10 @@ BINDINGS_DIR="$KIT_DIR/packages/smart-account-kit-bindings"
 CHECKED_IN="$BINDINGS_DIR/src/index.ts"
 
 # Canonical testnet WASM hash for the multisig-account-example, built from
-# OpenZeppelin/stellar-contracts @1e513890. Source of truth:
-# docs/deployments-protocol-27-2026-07-09.md.
-CANONICAL_WASM_HASH="${ACCOUNT_WASM_HASH:-1b5f4534a76322da2ad7c745f6900857a6802b0ca79850c35a03561df997785a}"
+# OpenZeppelin/stellar-contracts v0.7.3 (Rust 1.91.1, Stellar CLI 27.0.0,
+# `stellar contract build --locked --optimize=true`). It exposes the 1b5f4534
+# surface plus the errors that GHSA-jpg9-m7w4-c7wc added.
+CANONICAL_WASM_HASH="${ACCOUNT_WASM_HASH:-203e2970d9fed24fb5fca2e0aeebb3c1e4648b76dd6601567178e6474c9fec6f}"
 RPC_URL="${STELLAR_RPC_URL:-https://soroban-testnet.stellar.org}"
 PASSPHRASE="${STELLAR_NETWORK_PASSPHRASE:-Test SDF Network ; September 2015}"
 

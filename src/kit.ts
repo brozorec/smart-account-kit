@@ -1501,10 +1501,13 @@ export class SmartAccountKit {
    * (self-auth) and submitted. The contract's `operator` argument is ignored
    * (stellar-contract-utils Upgradeable), so the account's own address is passed.
    *
+   * The target must be in `acceptedWasmHashes`. Otherwise the SDK could not
+   * connect to the wallet after the upgrade.
+   *
    * @param newWasmHash - The new contract WASM hash (32-byte hash as hex string
    *   or Buffer)
    * @returns Assembled transaction that upgrades the contract when signed and sent
-   * @throws {ValidationError} If the hash is not 32 bytes
+   * @throws {ValidationError} If the hash is not 32 bytes or is not accepted
    * @throws Error if not connected to a wallet
    */
   async upgrade(
@@ -1518,6 +1521,14 @@ export class SmartAccountKit {
         `newWasmHash must be a 32-byte hash (got ${wasmHash.length} bytes)`,
         SmartAccountErrorCode.INVALID_INPUT,
         { length: wasmHash.length }
+      );
+    }
+    const targetHash = wasmHash.toString("hex");
+    if (!this.acceptedWasmHashes.includes(targetHash)) {
+      throw new ValidationError(
+        `newWasmHash ${targetHash} is not in \`acceptedWasmHashes\`, so the SDK would refuse to connect to the wallet after the upgrade`,
+        SmartAccountErrorCode.INVALID_INPUT,
+        { field: "newWasmHash", wasmHash: targetHash }
       );
     }
     return wallet.upgrade({ new_wasm_hash: wasmHash, operator: contractId });

@@ -9,6 +9,9 @@ import {
 } from "@stellar/stellar-sdk";
 import { SmartAccountKit } from "./kit";
 
+const LEGACY_HASH = "1b5f4534a76322da2ad7c745f6900857a6802b0ca79850c35a03561df997785a";
+const PATCHED_LEGACY_HASH = "203e2970d9fed24fb5fca2e0aeebb3c1e4648b76dd6601567178e6474c9fec6f";
+
 function makeAuthEntry(): xdr.SorobanAuthorizationEntry {
   const invocation = new xdr.SorobanAuthorizedInvocation({
     function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
@@ -101,6 +104,37 @@ describe("SmartAccountKit top-level surface", () => {
     expect(setConnectedState).toHaveBeenCalledTimes(1);
     expect(result.credentialId).toBe("cred-123");
     expect(result.signedTransaction).toBe("SIGNED_XDR");
+  });
+
+  describe("upgrade", () => {
+    function makeUpgradeKit(acceptedWasmHashes: string[]) {
+      const wallet = { upgrade: vi.fn(async () => ({ built: true })) };
+      const kit = {
+        requireWallet: () => ({ wallet, contractId: "CWALLET" }),
+        acceptedWasmHashes,
+      } as unknown as SmartAccountKit;
+      return { kit, wallet };
+    }
+
+    it("builds the upgrade to accepted code", async () => {
+      const { kit, wallet } = makeUpgradeKit([LEGACY_HASH, PATCHED_LEGACY_HASH]);
+
+      await SmartAccountKit.prototype.upgrade.call(kit, PATCHED_LEGACY_HASH.toUpperCase());
+
+      expect(wallet.upgrade).toHaveBeenCalledWith({
+        new_wasm_hash: Buffer.from(PATCHED_LEGACY_HASH, "hex"),
+        operator: "CWALLET",
+      });
+    });
+
+    it("refuses a target missing from acceptedWasmHashes", async () => {
+      const { kit, wallet } = makeUpgradeKit([LEGACY_HASH]);
+
+      await expect(
+        SmartAccountKit.prototype.upgrade.call(kit, PATCHED_LEGACY_HASH)
+      ).rejects.toThrow("acceptedWasmHashes");
+      expect(wallet.upgrade).not.toHaveBeenCalled();
+    });
   });
 
   it("authenticatePasskey delegates to the configured WebAuthn client", async () => {

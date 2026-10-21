@@ -266,8 +266,9 @@ const execResult = await kit.signAndSubmitAdmin(tx);
 // Or build + sign + submit in one step
 const oneShot = await kit.executeAndSubmit('CTARGET...', 'set_config', [owner, threshold]);
 
-// Upgrade the account's WASM (self-authorized)
-const upgradeTx = await kit.upgrade('1b5f4534...'); // 32-byte hex or Buffer
+// Upgrade the account's WASM (self-authorized). The target must be in
+// `acceptedWasmHashes`.
+const upgradeTx = await kit.upgrade('203e2970...'); // 32-byte hex or Buffer
 await kit.signAndSubmitAdmin(upgradeTx);
 
 // Disconnect
@@ -321,7 +322,7 @@ const err = decodeContractError('HostError: Error(Contract, #3221)');
 // err.contractErrorName === "SpendingLimitExceeded"
 ```
 
-`CONTRACT_ERROR_REGISTRY` covers every known contract code: SmartAccount (3000–3016), WebAuthn verifier (3110–3119), SimpleThreshold (3200–3203), WeightedThreshold (3210–3214), and SpendingLimit (3220–3227).
+`CONTRACT_ERROR_REGISTRY` covers every known contract code: SmartAccount (3000–3018), WebAuthn verifier (3110–3119), SimpleThreshold (3200–3203), WeightedThreshold (3210–3214), and SpendingLimit (3220–3227).
 
 ---
 
@@ -1096,7 +1097,7 @@ Key variables in `demo/.env`:
 
 ### Verifying bindings
 
-The checked-in bindings must stay byte-compatible with the canonical deployed WASM. `pnpm verify:bindings` regenerates the bindings from the canonical testnet WASM hash recorded in the deployments doc, diffs the result against `packages/smart-account-kit-bindings/src/index.ts`, and exits nonzero on any drift. If richer descriptions are wanted, fix them on the **contract** side (redeploy, then regenerate) — do not hand-edit the generated bindings, which re-introduces drift.
+The checked-in bindings must stay byte-compatible with the canonical deployed WASM. `pnpm verify:bindings` regenerates the bindings from the canonical testnet WASM hash set in `scripts/bindings/verify.sh`, diffs the result against `packages/smart-account-kit-bindings/src/index.ts`, and exits nonzero on any drift. If richer descriptions are wanted, fix them on the **contract** side (redeploy, then regenerate) — do not hand-edit the generated bindings, which re-introduces drift.
 
 ### Getting contract WASM hashes
 

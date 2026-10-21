@@ -2,6 +2,26 @@
 
 All reviews in this changelog are internal engineering reviews unless a linked report states otherwise.
 
+## Unreleased
+
+### Breaking security changes
+
+- `signers.addDelegated` accepts only G-addresses, matching `createDelegatedSigner`.
+- Reject a Delegated signer that is the wallet itself in `rules.add`, `signers.addDelegated`, and
+  `signers.addBatch`, mirroring stellar-accounts `SelfDelegatedSigner` (#3018). Wallets running
+  `1b5f4534…` do not enforce it on-chain
+  ([GHSA-jpg9-m7w4-c7wc](https://github.com/OpenZeppelin/stellar-contracts/security/advisories/GHSA-jpg9-m7w4-c7wc)).
+- `kit.upgrade()` refuses a target that is missing from `acceptedWasmHashes`.
+
+### Added
+
+- Decode contract errors `DelegatedSignerIsContextContract` (#3017) and `SelfDelegatedSigner`
+  (#3018).
+
+### Maintenance
+
+- Regenerate the bindings from the stellar-accounts v0.7.3 account build (`203e2970…`).
+
 ## 0.8.0 — 2026-09-08
 
 ### Breaking security changes

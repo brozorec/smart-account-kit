@@ -78,6 +78,8 @@ export class ContextRuleManager {
    * @param policies - Map of policy addresses to their parameters
    * @param validUntil - Optional ledger number when this rule expires
    * @returns Assembled transaction that creates the rule when signed and sent
+   * @throws {ValidationError} On a contract limit violation, or if a Delegated
+   *   signer is the wallet itself
    * @throws Error if not connected to a wallet
    */
   async add(
@@ -87,13 +89,15 @@ export class ContextRuleManager {
     policies: Map<string, unknown>,
     validUntil?: number
   ) {
+    const { wallet, contractId } = this.deps.requireWallet();
     validateContextRule({
       name,
       signers,
       policyCount: policies.size,
       validUntil,
+      account: contractId,
     });
-    return this.deps.requireWallet().wallet.add_context_rule({
+    return wallet.add_context_rule({
       context_type: contextType,
       name,
       valid_until: validUntil,
