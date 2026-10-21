@@ -168,6 +168,7 @@ export {
   createDefaultContext,
   createCallContractContext,
   createCreateContractContext,
+  createCreateContractExternalRefContext,
   // Policy parameter builders
   createThresholdParams,
   createWeightedThresholdParams,

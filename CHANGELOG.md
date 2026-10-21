@@ -25,12 +25,14 @@ All reviews in this changelog are internal engineering reviews unless a linked r
 - Add the `authDigestSchemes` config option. Built-in entries cover `1b5f4534…` and
   stellar-accounts v0.7.3 (`203e2970…`) as `legacy-concat`, and v0.8.0 (`c514d35e…`) as
   `preimage-v1`.
+- Support `CreateContractExternalRef(owner, tag)` context rules for CAP-85 executable-reference
+  deployments, with `createCreateContractExternalRefContext` and display formatting.
 - Decode contract errors `DelegatedSignerIsContextContract` (#3017) and `SelfDelegatedSigner`
   (#3018).
 
 ### Maintenance
 
-- Regenerate the bindings from the stellar-accounts v0.7.3 account build (`203e2970…`).
+- Regenerate the bindings from the stellar-accounts v0.8.0 account build (`c514d35e…`).
 
 ## 0.8.0 — 2026-09-08
 

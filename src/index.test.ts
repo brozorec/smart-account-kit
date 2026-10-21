@@ -11,6 +11,7 @@ describe("package root exports", () => {
     expect(typeof sdk.describeSignerType).toBe("function");
     expect(typeof sdk.formatSignerForDisplay).toBe("function");
     expect(typeof sdk.formatContextType).toBe("function");
+    expect(typeof sdk.createCreateContractExternalRefContext).toBe("function");
     expect(typeof sdk.getCredentialIdFromSigner).toBe("function");
     expect(typeof sdk.signersEqual).toBe("function");
     expect(typeof sdk.getSignerKey).toBe("function");
