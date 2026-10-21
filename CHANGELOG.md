@@ -8,8 +8,9 @@ All reviews in this changelog are internal engineering reviews unless a linked r
 
 - `signers.addDelegated` accepts only G-addresses, matching `createDelegatedSigner`.
 - Reject a Delegated signer that is the wallet itself in `rules.add`, `signers.addDelegated`, and
-  `signers.addBatch`, mirroring stellar-accounts `SelfDelegatedSigner` (#3018). Wallets running
-  `1b5f4534…` do not enforce it on-chain
+  `signers.addBatch`, and refuse to sign an admin transaction that adds one, mirroring
+  stellar-accounts `SelfDelegatedSigner` (#3018). Wallets running `1b5f4534…` do not enforce it
+  on-chain
   ([GHSA-jpg9-m7w4-c7wc](https://github.com/OpenZeppelin/stellar-contracts/security/advisories/GHSA-jpg9-m7w4-c7wc)).
 - `kit.upgrade()` refuses a target that is missing from `acceptedWasmHashes`.
 

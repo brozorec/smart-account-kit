@@ -11,6 +11,7 @@ import type {
 import { signersEqual } from "../signer-utils.js";
 import type { WebAuthnSigData } from "../contract-types.js";
 import { SmartAccountErrorCode, ValidationError } from "../errors.js";
+import { validateSigner } from "../validation.js";
 
 /** Smart-account functions that can change authority or execute wallet actions. */
 export const WALLET_MUTATION_FUNCTIONS = new Set([
@@ -27,11 +28,21 @@ export const WALLET_MUTATION_FUNCTIONS = new Set([
   "update_context_rule_valid_until",
 ]);
 
+/** Where each signer-adding wallet function takes its signers. */
+const SIGNER_ARGUMENTS: Record<string, { index: number; list: boolean }> = {
+  add_signer: { index: 1, list: false },
+  batch_add_signer: { index: 1, list: true },
+  add_context_rule: { index: 3, list: true },
+};
+
 /**
  * Refuse wallet mutations on generic signing paths.
  *
  * A dedicated admin path must provide the transaction host function. The
  * mutation must be the root invocation and must match that function exactly.
+ * Every signer the mutation adds must pass `validateSigner` for this wallet,
+ * so a transaction built from the raw client cannot make the wallet its own
+ * delegated signer either.
  */
 export function assertWalletMutationIntent(
   entry: xdr.SorobanAuthorizationEntry,
@@ -87,6 +98,25 @@ export function assertWalletMutationIntent(
   const transactionArgs = adminHostFunction.invokeContract();
   if (!Buffer.from(rootArgs.toXDR()).equals(Buffer.from(transactionArgs.toXDR()))) {
     fail("The admin authorization root does not match the transaction host function.");
+  }
+  assertAddedSignersValid(rootArgs, contractId);
+}
+
+/**
+ * Validate the signers a wallet mutation adds. Wallets running code from
+ * before stellar-accounts 0.7.3 do not reject a self-delegated signer
+ * on-chain.
+ */
+function assertAddedSignersValid(
+  args: xdr.InvokeContractArgs,
+  contractId: string
+): void {
+  const position = SIGNER_ARGUMENTS[args.functionName().toString()];
+  const value = position && args.args()[position.index];
+  if (!value) return;
+  const signers = position.list ? value.vec() ?? [] : [value];
+  for (const signer of signers) {
+    validateSigner(parseSignerScVal(signer), contractId);
   }
 }
 

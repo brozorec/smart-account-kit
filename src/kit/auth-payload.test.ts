@@ -178,6 +178,51 @@ describe("auth-payload", () => {
     ).toThrow("does not match the transaction host function");
   });
 
+  describe("signers added on the admin path", () => {
+    const wallet = Address.contract(hash(Buffer.from("wallet-admin"))).toString();
+    const self = signerToScVal(makeDelegatedSigner(wallet));
+    const other = signerToScVal(makeDelegatedSigner(makeAccount(28)));
+
+    function assertAdmin(functionName: string, args: xdr.ScVal[]) {
+      const root = makeContractInvocation(wallet, functionName, [], args);
+      const entry = withRootInvocation(makeAuthEntry(makeAccount(27)), root);
+      const hostFunction = xdr.HostFunction.hostFunctionTypeInvokeContract(
+        root.function().contractFn()
+      );
+      assertWalletMutationIntent(entry, wallet, hostFunction);
+    }
+
+    function contextRuleArgs(signers: xdr.ScVal[]): xdr.ScVal[] {
+      return [
+        xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Default")]),
+        xdr.ScVal.scvString("rule"),
+        xdr.ScVal.scvVoid(),
+        xdr.ScVal.scvVec(signers),
+        xdr.ScVal.scvMap([]),
+      ];
+    }
+
+    it("refuses a mutation that makes the wallet its own delegated signer", () => {
+      expect(() => assertAdmin("add_signer", [xdr.ScVal.scvU32(0), self])).toThrow(
+        "cannot be its own delegated signer"
+      );
+      expect(() =>
+        assertAdmin("batch_add_signer", [xdr.ScVal.scvU32(0), xdr.ScVal.scvVec([other, self])])
+      ).toThrow("cannot be its own delegated signer");
+      expect(() => assertAdmin("add_context_rule", contextRuleArgs([other, self]))).toThrow(
+        "cannot be its own delegated signer"
+      );
+    });
+
+    it("accepts a mutation that adds other signers", () => {
+      expect(() => assertAdmin("add_signer", [xdr.ScVal.scvU32(0), other])).not.toThrow();
+      expect(() =>
+        assertAdmin("batch_add_signer", [xdr.ScVal.scvU32(0), xdr.ScVal.scvVec([other])])
+      ).not.toThrow();
+      expect(() => assertAdmin("add_context_rule", contextRuleArgs([other]))).not.toThrow();
+    });
+  });
+
   it("round-trips AuthPayload with signer map and context rule ids", () => {
     const signer = makeDelegatedSigner(
       makeAccount(1)
