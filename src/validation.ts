@@ -8,6 +8,7 @@
  * @packageDocumentation
  */
 
+import { StrKey } from "@stellar/stellar-sdk";
 import type { Signer as ContractSigner } from "smart-account-kit-bindings";
 import {
   MAX_EXTERNAL_KEY_SIZE,
@@ -64,12 +65,14 @@ export function validateExternalKeySize(keyData: Uint8Array | Buffer): void {
 
 /**
  * Validate a single signer: External signers must have key data within
- * `MAX_EXTERNAL_KEY_SIZE`, and a Delegated signer must not be the smart account
- * it is added to.
+ * `MAX_EXTERNAL_KEY_SIZE`, and a Delegated signer must be a Stellar account
+ * (G-address) that is not the smart account it is added to.
  *
  * The self-delegation check mirrors the contract's `SelfDelegatedSigner`
- * (#3018). Wallets running code from before stellar-accounts 0.7.3 do not
- * enforce it on-chain.
+ * (#3018). A Delegated contract signer allows self, mutual, and caller
+ * delegation (GHSA-jpg9-m7w4-c7wc), and wallets running code from before
+ * stellar-accounts 0.7.3 enforce none of these on-chain, so the SDK refuses
+ * every Delegated C-address.
  *
  * @param signer - The signer to validate
  * @param account - The smart account the signer is added to; omit to skip the
@@ -91,6 +94,13 @@ export function validateSigner(signer: ContractSigner, account?: string): void {
         "A smart account cannot be its own delegated signer",
         SmartAccountErrorCode.INVALID_INPUT,
         { field: "signer", account }
+      );
+    }
+    if (!StrKey.isValidEd25519PublicKey(address)) {
+      throw new ValidationError(
+        "A delegated signer must be a Stellar account (G-address). Delegating to a contract can let anyone authorize the account.",
+        SmartAccountErrorCode.INVALID_ADDRESS,
+        { field: "signer", address }
       );
     }
   }

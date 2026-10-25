@@ -12,6 +12,14 @@ All reviews in this changelog are internal engineering reviews unless a linked r
   stellar-accounts `SelfDelegatedSigner` (#3018). Wallets running `1b5f4534…` do not enforce it
   on-chain
   ([GHSA-jpg9-m7w4-c7wc](https://github.com/OpenZeppelin/stellar-contracts/security/advisories/GHSA-jpg9-m7w4-c7wc)).
+- Reject every Delegated signer that is a contract (C-address) in `rules.add`,
+  `signers.addBatch`, and admin transactions. A Delegated contract signer allows mutual and
+  caller delegation, and wallets running `1b5f4534…` have no on-chain guard against either.
+- Signing fails closed with `AuthDigestSchemeError` when the wallet runs code that is not in the
+  digest scheme table. Wallets on a self-built account WASM must add their hash with the
+  `authDigestSchemes` option.
+- The regenerated bindings add a `CreateContractExternalRef` case to `ContextRuleType`. An
+  exhaustive `switch` over it must handle the new case.
 - `kit.upgrade()` refuses a target that is missing from `acceptedWasmHashes` or has no known
   authorization digest scheme, and wallet deployment refuses an `accountWasmHash` without one.
 - `computeEntryAuthDigest` takes a required digest scheme and also returns the delegated
@@ -21,7 +29,7 @@ All reviews in this changelog are internal engineering reviews unless a linked r
 
 - Support the stellar-accounts v0.8.0 `AuthDigestPreimage` digest (`preimage-v1`) next to the
   deployed `legacy-concat` digest. The SDK picks the scheme from the wallet's current WASM hash
-  before every signature and fails closed with `AuthDigestSchemeError` for unknown code.
+  before every signature.
 - Add the `authDigestSchemes` config option. Built-in entries cover `1b5f4534…` and
   stellar-accounts v0.7.3 (`203e2970…`) as `legacy-concat`, and v0.8.0 (`c514d35e…`) as
   `preimage-v1`.

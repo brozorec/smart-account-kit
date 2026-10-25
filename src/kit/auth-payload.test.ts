@@ -214,6 +214,20 @@ describe("auth-payload", () => {
       );
     });
 
+    it("refuses a mutation that adds another contract as a delegated signer", () => {
+      const peer = Address.contract(hash(Buffer.from("wallet-peer"))).toString();
+      const contract = signerToScVal(makeDelegatedSigner(peer));
+      expect(() => assertAdmin("add_signer", [xdr.ScVal.scvU32(0), contract])).toThrow(
+        "must be a Stellar account"
+      );
+      expect(() =>
+        assertAdmin("batch_add_signer", [xdr.ScVal.scvU32(0), xdr.ScVal.scvVec([other, contract])])
+      ).toThrow("must be a Stellar account");
+      expect(() => assertAdmin("add_context_rule", contextRuleArgs([other, contract]))).toThrow(
+        "must be a Stellar account"
+      );
+    });
+
     it("accepts a mutation that adds other signers", () => {
       expect(() => assertAdmin("add_signer", [xdr.ScVal.scvU32(0), other])).not.toThrow();
       expect(() =>
