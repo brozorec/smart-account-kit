@@ -36,17 +36,25 @@ TypeScript SDK for deploying and managing OpenZeppelin smart account contracts o
 The kit is a client for the OpenZeppelin [`stellar-contracts`](https://github.com/OpenZeppelin/stellar-contracts) smart-account contract. A few concepts recur throughout the API.
 
 - **Smart account** — a contract wallet. Every mutating entry point self-authorizes (`require_auth` on the account's own address), so account operations are authorized by the account's signers rather than by an external transaction source.
-- **Context rules** — the account's authorization policy. Each rule has a **context type** — `Default` (matches any operation), `CallContract(address)` (a specific target contract), or `CreateContract(wasmHash)` (deploying a specific WASM) — a set of **signers**, a set of **policies**, and an optional `valid_until` expiry. A rule with no policies requires **all** its signers to authenticate; a rule with policies defers to those policies.
+- **Context rules** — the account's authorization policy. Each rule has a **context type** — `Default` (matches any operation), `CallContract(address)` (a specific target contract), `CreateContract(wasmHash)` (deploying a specific WASM), or `CreateContractExternalRef(owner, tag)` (deploying from a [CAP-85](https://stellar.org/protocol/cap-85) executable reference; newer account builds only) — a set of **signers**, a set of **policies**, and an optional `valid_until` expiry. A rule with no policies requires **all** its signers to authenticate; a rule with policies defers to those policies.
 - **Signers** — an on-chain `Signer` is either `Delegated(G-address)` (native Stellar `require_auth`) or `External(verifier, keyData)` (a verifier contract validates a signature). Passkeys are `External` signers against the WebAuthn verifier; Ed25519 keys are `External` signers against the Ed25519 verifier.
 - **Policies** — contracts that enforce additional constraints during authorization (e.g. N-of-M threshold, weighted voting, spending limits). Policies are multi-tenant: their state is keyed by `(smart_account, context_rule_id)`.
-- **Auth digest** — every signer authenticates the same Protocol 27 digest, which binds the approved context rule ids:
+- **Auth digest** — every signer on an authorization entry authenticates the same digest, which binds the approved context rule ids. Its format depends on the code the wallet runs:
 
   ```text
-  signature_payload = sha256(P27 auth preimage)
-  auth_digest       = sha256(signature_payload ++ context_rule_ids.to_xdr())
+  signature_payload = sha256(HashIdPreimage)
+
+  legacy-concat (stellar-contracts before #868: 1b5f4534…, stellar-accounts v0.7.3 203e2970…):
+    auth_digest = sha256(signature_payload ++ context_rule_ids.to_xdr())
+    delegated signers authorize __check_auth(auth_digest)
+
+  preimage-v1 (stellar-contracts #868 and later: stellar-accounts v0.8.0 c514d35e…):
+    preimage    = AuthDigestPreimage { account, signature_payload, context_rule_ids }
+    auth_digest = sha256(preimage.to_xdr())
+    delegated signers authorize __check_auth(preimage)
   ```
 
-  Signers never sign the raw payload — they sign `auth_digest`. The SDK computes and binds this for you.
+  Signers never sign the raw payload — they sign `auth_digest`. Before every signature the SDK reads the wallet's current WASM hash and picks the scheme from `authDigestSchemes`. It refuses to sign for code it cannot map, and refuses to deploy a wallet on such code or upgrade one to it.
 
 ## Installation
 
@@ -108,6 +116,7 @@ The current Protocol 27 testnet/mainnet deployed contract IDs and WASM hashes ar
 | `accountWasmHash` | `string` | Yes | Smart account WASM hash for deployment |
 | `acceptedWasmHashes` | `string[]` | No | Current code identities accepted for every connection. Defaults to `[accountWasmHash]`. Add each approved upgrade hash — see [security notes](./docs/security-deterministic-deployer.md) |
 | `acceptedBirthWasmHashes` | `string[]` | No | Code identities accepted in immutable wallet creation history. Defaults to `[accountWasmHash]`. Keep this list constructor-compatible and narrow |
+| `authDigestSchemes` | `Record<string, AuthDigestScheme>` | No | Authorization digest scheme (`legacy-concat` or `preimage-v1`) per account WASM hash. Merged over built-in entries for the canonical deployments. Signing fails with `AuthDigestSchemeError` for a hash with no entry |
 | `horizonUrl` | `string \| false` | No | Full-history fallback for birth verification. Known public networks use official Horizon services by default |
 | `allowedOrigins` | `string[]` | No | Origins accepted during fresh WebAuthn ownership verification. Defaults to the current browser origin. Required outside a browser |
 | `webauthnVerifierAddress` | `string` | Yes | Deployed WebAuthn verifier contract address |
@@ -266,8 +275,9 @@ const execResult = await kit.signAndSubmitAdmin(tx);
 // Or build + sign + submit in one step
 const oneShot = await kit.executeAndSubmit('CTARGET...', 'set_config', [owner, threshold]);
 
-// Upgrade the account's WASM (self-authorized)
-const upgradeTx = await kit.upgrade('1b5f4534...'); // 32-byte hex or Buffer
+// Upgrade the account's WASM (self-authorized). The target must be in
+// `acceptedWasmHashes` and have a known digest scheme.
+const upgradeTx = await kit.upgrade('203e2970...'); // 32-byte hex or Buffer
 await kit.signAndSubmitAdmin(upgradeTx);
 
 // Disconnect
@@ -321,7 +331,7 @@ const err = decodeContractError('HostError: Error(Contract, #3221)');
 // err.contractErrorName === "SpendingLimitExceeded"
 ```
 
-`CONTRACT_ERROR_REGISTRY` covers every known contract code: SmartAccount (3000–3016), WebAuthn verifier (3110–3119), SimpleThreshold (3200–3203), WeightedThreshold (3210–3214), and SpendingLimit (3220–3227).
+`CONTRACT_ERROR_REGISTRY` covers every known contract code: SmartAccount (3000–3018), WebAuthn verifier (3110–3119), SimpleThreshold (3200–3203), WeightedThreshold (3210–3214), and SpendingLimit (3220–3227).
 
 ---
 
@@ -1096,7 +1106,7 @@ Key variables in `demo/.env`:
 
 ### Verifying bindings
 
-The checked-in bindings must stay byte-compatible with the canonical deployed WASM. `pnpm verify:bindings` regenerates the bindings from the canonical testnet WASM hash recorded in the deployments doc, diffs the result against `packages/smart-account-kit-bindings/src/index.ts`, and exits nonzero on any drift. If richer descriptions are wanted, fix them on the **contract** side (redeploy, then regenerate) — do not hand-edit the generated bindings, which re-introduces drift.
+The checked-in bindings must stay byte-compatible with the canonical deployed WASM. `pnpm verify:bindings` regenerates the bindings from the canonical testnet WASM hash set in `scripts/bindings/verify.sh`, diffs the result against `packages/smart-account-kit-bindings/src/index.ts`, and exits nonzero on any drift. If richer descriptions are wanted, fix them on the **contract** side (redeploy, then regenerate) — do not hand-edit the generated bindings, which re-introduces drift.
 
 ### Getting contract WASM hashes
 

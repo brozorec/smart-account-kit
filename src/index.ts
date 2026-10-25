@@ -121,6 +121,7 @@ export {
   SmartAccountErrorCode,
   WalletNotConnectedError,
   WalletCodeNotAcceptedError,
+  AuthDigestSchemeError,
   WalletProvenanceError,
   WalletOwnershipError,
   WalletAmbiguousError,
@@ -167,6 +168,7 @@ export {
   createDefaultContext,
   createCallContractContext,
   createCreateContractContext,
+  createCreateContractExternalRefContext,
   // Policy parameter builders
   createThresholdParams,
   createWeightedThresholdParams,
@@ -190,7 +192,12 @@ export {
 
 // Signer abstraction (Ed25519 + shared auth-digest core)
 export { Ed25519Signer, computeEntryAuthDigest } from "./signers.js";
-export type { AuthDigestSigner } from "./signers.js";
+export type { AuthDigestSigner, EntryAuthDigest } from "./signers.js";
+export {
+  AUTH_DIGEST_SCHEMES,
+  KNOWN_AUTH_DIGEST_SCHEMES,
+} from "./kit/auth-digest-scheme.js";
+export type { AuthDigestScheme } from "./kit/auth-digest-scheme.js";
 
 // Advanced flows: auth-payload signer encoding + transaction helpers
 export { signerToScVal, parseSignerScVal } from "./kit/auth-payload.js";
