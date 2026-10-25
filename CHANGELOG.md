@@ -35,6 +35,12 @@ All reviews in this changelog are internal engineering reviews unless a linked r
   `preimage-v1`.
 - Support `CreateContractExternalRef(owner, tag)` context rules for CAP-85 executable-reference
   deployments, with `createCreateContractExternalRefContext` and display formatting.
+- `signAuthEntryWithSigners()`: sign one authorization entry with local
+  `AuthDigestSigner`s (for example `Ed25519Signer`) and return it without
+  submitting. It needs no browser, passkey, connected kit, or RPC. It refuses
+  smart-account mutations and binds `contextRuleIds` into the auth digest. The caller passes the
+  wallet's `authDigestScheme`, because the helper does not read chain state.
+  Closes [#13](https://github.com/stellar/smart-account-kit/issues/13).
 - Decode contract errors `DelegatedSignerIsContextContract` (#3017) and `SelfDelegatedSigner`
   (#3018).
 

@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { Keypair, hash, xdr } from "@stellar/stellar-sdk";
+import { Address, xdr as stellarXdr } from "@stellar/stellar-sdk";
 import {
   buildAuthDigestPreimage,
   buildLegacyAuthDigest,
   buildPreimageAuthDigest,
+  getAddressCredentials,
+  readAuthPayload,
 } from "./kit/auth-payload";
 import { AUTH_DIGEST_SCHEMES, type AuthDigestScheme } from "./kit/auth-digest-scheme";
-import { Ed25519Signer, computeEntryAuthDigest } from "./signers";
+import {
+  Ed25519Signer,
+  computeEntryAuthDigest,
+  signAuthEntryWithSigners,
+} from "./signers";
 import { ValidationError } from "./errors";
+import { signersEqual } from "./signer-utils";
 import { makeAddressAuthEntry, makeContract } from "./managers/test-utils";
 
 const TESTNET = "Test SDF Network ; September 2015";
@@ -236,5 +244,251 @@ describe("Ed25519Signer", () => {
     expect(() => Ed25519Signer.fromSecret("not-a-secret", verifier)).toThrow(
       ValidationError
     );
+  });
+});
+
+describe("signAuthEntryWithSigners", () => {
+  const verifier = makeContract(20);
+  const contractId = makeContract(21);
+  const keypairA = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 12));
+  const keypairB = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 13));
+  const signerA = new Ed25519Signer(keypairA, verifier);
+  const signerB = new Ed25519Signer(keypairB, verifier);
+
+  function makeMutationEntry(functionName: string): stellarXdr.SorobanAuthorizationEntry {
+    return new stellarXdr.SorobanAuthorizationEntry({
+      credentials: makeAddressAuthEntry(contractId).credentials(),
+      rootInvocation: new stellarXdr.SorobanAuthorizedInvocation({
+        function: stellarXdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new stellarXdr.InvokeContractArgs({
+            contractAddress: Address.fromString(contractId).toScAddress(),
+            functionName,
+            args: [],
+          })
+        ),
+        subInvocations: [],
+      }),
+    });
+  }
+
+  it("returns a signed copy carrying the rule ids and a verifiable signature", async () => {
+    const entry = makeAddressAuthEntry(contractId);
+    const before = entry.toXDR("base64");
+
+    const signed = await signAuthEntryWithSigners(entry, [signerA], {
+      networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+      contextRuleIds: [3],
+      expiration: 500,
+    });
+
+    // Input untouched; output is a distinct signed entry.
+    expect(entry.toXDR("base64")).toBe(before);
+    expect(signed.toXDR("base64")).not.toBe(before);
+
+    const credentials = getAddressCredentials(signed.credentials());
+    expect(credentials.signatureExpirationLedger()).toBe(500);
+
+    const payload = readAuthPayload(credentials.signature());
+    expect(payload.context_rule_ids).toEqual([3]);
+    expect(payload.signers.size).toBe(1);
+    const [[signer, sig]] = Array.from(payload.signers.entries());
+    expect(signersEqual(signer, signerA.signer)).toBe(true);
+
+    // The signature is over the P27 auth digest bound to [3] and expiration 500.
+    const { authDigest } = computeEntryAuthDigest(
+      TESTNET,
+      stellarXdr.SorobanAuthorizationEntry.fromXDR(entry.toXDR()),
+      500,
+      [3],
+      "legacy-concat"
+    );
+    expect(keypairA.verify(authDigest, sig)).toBe(true);
+    expect(
+      keypairA.verify(
+        computeEntryAuthDigest(
+          TESTNET,
+          stellarXdr.SorobanAuthorizationEntry.fromXDR(entry.toXDR()),
+          500,
+          [4],
+      "legacy-concat"
+        ).authDigest,
+        sig
+      )
+    ).toBe(false);
+  });
+
+  it("adds a second signer to a partially signed entry without dropping the first", async () => {
+    const entry = makeAddressAuthEntry(contractId);
+    const first = await signAuthEntryWithSigners(entry, [signerA], {
+      networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+      contextRuleIds: [3],
+      expiration: 500,
+    });
+    // Second signer reads ids and expiration from the payload; no options needed.
+    const second = await signAuthEntryWithSigners(first, [signerB], {
+      networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+    });
+
+    const payload = readAuthPayload(getAddressCredentials(second.credentials()).signature());
+    expect(payload.context_rule_ids).toEqual([3]);
+    expect(payload.signers.size).toBe(2);
+  });
+
+  it("replaces a repeated signer instead of duplicating it", async () => {
+    const entry = makeAddressAuthEntry(contractId);
+    const signed = await signAuthEntryWithSigners(entry, [signerA, signerA], {
+      networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+      contextRuleIds: [3],
+      expiration: 500,
+    });
+    const payload = readAuthPayload(getAddressCredentials(signed.credentials()).signature());
+    expect(payload.signers.size).toBe(1);
+  });
+
+  it("refuses smart-account mutations", async () => {
+    for (const fn of ["execute", "add_signer", "add_policy", "upgrade"]) {
+      await expect(
+        signAuthEntryWithSigners(makeMutationEntry(fn), [signerA], {
+          networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+          contextRuleIds: [0],
+          expiration: 500,
+        })
+      ).rejects.toThrow(ValidationError);
+    }
+  });
+
+  it("refuses a rule-id mismatch with an already signed payload", async () => {
+    const first = await signAuthEntryWithSigners(makeAddressAuthEntry(contractId), [signerA], {
+      networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+      contextRuleIds: [3],
+      expiration: 500,
+    });
+    await expect(
+      signAuthEntryWithSigners(first, [signerB], {
+        networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+        contextRuleIds: [4],
+      })
+    ).rejects.toThrow(/different context rule IDs/);
+  });
+
+  it("requires rule ids, an expiration, and at least one signer", async () => {
+    const entry = makeAddressAuthEntry(contractId);
+    getAddressCredentials(entry.credentials()).signatureExpirationLedger(0);
+
+    await expect(
+      signAuthEntryWithSigners(entry, [signerA], { networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat", expiration: 500 })
+    ).rejects.toThrow(/contextRuleIds are required/);
+    await expect(
+      signAuthEntryWithSigners(entry, [signerA], { networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat", contextRuleIds: [1] })
+    ).rejects.toThrow(/expiration ledger is required/);
+    await expect(
+      signAuthEntryWithSigners(entry, [], {
+        networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+        contextRuleIds: [1],
+        expiration: 500,
+      })
+    ).rejects.toThrow(/At least one signer/);
+  });
+
+  it("rejects source-account and delegated credential types", async () => {
+    const sourceEntry = new stellarXdr.SorobanAuthorizationEntry({
+      credentials: stellarXdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+      rootInvocation: makeAddressAuthEntry(contractId).rootInvocation(),
+    });
+    await expect(
+      signAuthEntryWithSigners(sourceEntry, [signerA], {
+        networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+        contextRuleIds: [1],
+        expiration: 500,
+      })
+    ).rejects.toThrow(/address-credential/);
+  });
+
+  it("accepts any AuthDigestSigner, not only Ed25519", async () => {
+    const calls: Buffer[] = [];
+    const custom = {
+      signer: signerB.signer,
+      signAuthDigest: async (digest: Buffer) => {
+        calls.push(digest);
+        return Buffer.alloc(64, 9);
+      },
+    };
+    const signed = await signAuthEntryWithSigners(makeAddressAuthEntry(contractId), [custom], {
+      networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+      contextRuleIds: [7],
+      expiration: 600,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toHaveLength(32);
+    const payload = readAuthPayload(getAddressCredentials(signed.credentials()).signature());
+    expect(Array.from(payload.signers.values())[0]).toEqual(Buffer.alloc(64, 9));
+  });
+  it("signs the preimage-v1 digest for a v0.8.0 wallet", async () => {
+    const entry = makeAddressAuthEntry(contractId);
+    const signed = await signAuthEntryWithSigners(entry, [signerA], {
+      networkPassphrase: TESTNET,
+      authDigestScheme: "preimage-v1",
+      contextRuleIds: [3],
+      expiration: 500,
+    });
+    const payload = readAuthPayload(getAddressCredentials(signed.credentials()).signature());
+    const [sig] = Array.from(payload.signers.values());
+    const digest = (scheme: AuthDigestScheme) =>
+      computeEntryAuthDigest(
+        TESTNET,
+        stellarXdr.SorobanAuthorizationEntry.fromXDR(entry.toXDR()),
+        500,
+        [3],
+        scheme
+      ).authDigest;
+
+    expect(keypairA.verify(digest("preimage-v1"), sig)).toBe(true);
+    expect(keypairA.verify(digest("legacy-concat"), sig)).toBe(false);
+  });
+
+  it("refuses an unknown digest scheme", async () => {
+    await expect(
+      signAuthEntryWithSigners(makeAddressAuthEntry(contractId), [signerA], {
+        networkPassphrase: TESTNET,
+        authDigestScheme: "preimage-v2" as AuthDigestScheme,
+        contextRuleIds: [3],
+        expiration: 500,
+      })
+    ).rejects.toThrow(/authDigestScheme must be one of/);
+  });
+
+  it("refuses to change the expiration of a partially signed entry", async () => {
+    const first = await signAuthEntryWithSigners(makeAddressAuthEntry(contractId), [signerA], {
+      networkPassphrase: TESTNET,
+      authDigestScheme: "legacy-concat",
+      contextRuleIds: [3],
+      expiration: 500,
+    });
+    await expect(
+      signAuthEntryWithSigners(first, [signerB], {
+        networkPassphrase: TESTNET,
+        authDigestScheme: "legacy-concat",
+        expiration: 600,
+      })
+    ).rejects.toThrow(/different expiration ledger/);
+    await expect(
+      signAuthEntryWithSigners(first, [signerB], {
+        networkPassphrase: TESTNET,
+        authDigestScheme: "legacy-concat",
+        expiration: 500,
+      })
+    ).resolves.toBeDefined();
   });
 });
